@@ -46,6 +46,17 @@
   function localProxyAttempt(url) {
     return IS_LOCAL_NETWORK_HOST ? `${LOCAL_PROXY}${encodeURIComponent(url)}` : null;
   }
+
+  // CoinGecko bloquea por CORS el origen de GitHub Pages aunque anuncie "*"
+  // en la respuesta. En host estatico se prueba primero el proxy CORS publico
+  // para no dejar errores en consola ni esperar al fallo directo.
+  const CORS_BLOCKED_DIRECT_HOSTS = ['api.coingecko.com'];
+
+  function prefersCorsProxyFirst(url) {
+    if (IS_LOCAL_NETWORK_HOST) return false;
+    const target = String(url || '');
+    return CORS_BLOCKED_DIRECT_HOSTS.some((host) => target.includes(host));
+  }
   const CBBI_URL = 'https://colintalkscrypto.com/cbbi/data/latest.json';
   const DUNE_QUERY_ID = 3265994;
   const SESSION_STALE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -648,8 +659,11 @@
     if (local) attempts.push(local);
     const userProxy = externalProxyAttempt(url, attempts);
     if (userProxy) attempts.push(userProxy);
+    const proxyFirst = prefersCorsProxyFirst(url);
+    const allOrigins = `${ALLORIGINS_PROXY}${encodeURIComponent(url)}`;
+    if (proxyFirst) attempts.push(allOrigins);
     attempts.push(url);
-    attempts.push(`${ALLORIGINS_PROXY}${encodeURIComponent(url)}`);
+    if (!proxyFirst) attempts.push(allOrigins);
     return fetchFirst(attempts, { ...options, cacheKey: options.cacheKey || `public ${url}` });
   }
 
