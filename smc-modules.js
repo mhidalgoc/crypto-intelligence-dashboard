@@ -17,6 +17,10 @@
   ];
   const CONFIG_KEY = 'crypto_smc_radar_config_v1';
   const MAX_WATCHLIST = 20;
+  // En GitHub Pages no existe /proxy: se omite para no generar 404.
+  const LOCAL_PROXY_ENABLED = location.port === '4173'
+    || /^(localhost|127\.0\.0\.1|0\.0\.0\.0|::1)$/i.test(location.hostname)
+    || /^(10|192\.168|172\.(1[6-9]|2\d|3[01]))\./.test(location.hostname);
 
   let radarRows = [];
   let radarTimeframe = '4h';
@@ -95,13 +99,12 @@
   }
 
   async function fetchJson(url, timeoutMs = 15000) {
+    const attempts = [];
+    if (LOCAL_PROXY_ENABLED) attempts.push(`/proxy?url=${encodeURIComponent(url)}`);
+    attempts.push(url);
     if (window.QuantFetch && typeof window.QuantFetch.first === 'function') {
-      return window.QuantFetch.first(
-        [`/proxy?url=${encodeURIComponent(url)}`, url],
-        { timeout: timeoutMs, cacheKey: `public ${url}` }
-      );
+      return window.QuantFetch.first(attempts, { timeout: timeoutMs, cacheKey: `public ${url}` });
     }
-    const attempts = [`/proxy?url=${encodeURIComponent(url)}`, url];
     let lastError = null;
     for (const target of attempts) {
       const controller = new AbortController();

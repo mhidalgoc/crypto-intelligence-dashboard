@@ -23,6 +23,10 @@
   const TG_CONFIG_KEY = 'crypto_telegram_bot_config_v1';
   const JOURNAL_KEY = 'crypto_swing_trading_journal_v1';
   const CHECK_INTERVAL_MS = 15000;
+  // En GitHub Pages no existe /proxy: se omite para no generar 404.
+  const LOCAL_PROXY_ENABLED = location.port === '4173'
+    || /^(localhost|127\.0\.0\.1|0\.0\.0\.0|::1)$/i.test(location.hostname)
+    || /^(10|192\.168|172\.(1[6-9]|2\d|3[01]))\./.test(location.hostname);
 
   let audioContext = null;
   let evaluatingAlerts = false;
@@ -84,13 +88,12 @@
   }
 
   async function alertFetchJson(target, timeoutMs = 15000) {
+    const attempts = [];
+    if (LOCAL_PROXY_ENABLED) attempts.push(`/proxy?url=${encodeURIComponent(target)}`);
+    attempts.push(target);
     if (window.QuantFetch && typeof window.QuantFetch.first === 'function') {
-      return window.QuantFetch.first(
-        [`/proxy?url=${encodeURIComponent(target)}`, target],
-        { timeout: timeoutMs, cacheKey: `public ${target}` }
-      );
+      return window.QuantFetch.first(attempts, { timeout: timeoutMs, cacheKey: `public ${target}` });
     }
-    const attempts = [`/proxy?url=${encodeURIComponent(target)}`, target];
     let lastError = null;
     for (const url of attempts) {
       try {
@@ -202,19 +205,21 @@
       });
     }
 
-    attempts.push({
-      name: 'proxy local',
-      run: async () => {
-        const response = await fetchWithTimeout(`/proxy?url=${encodeURIComponent(target)}`, {
-          cache: 'no-store',
-          credentials: 'omit'
-        }, 8000);
-        const text = await response.text();
-        let data = null;
-        try { data = JSON.parse(text); } catch (error) {}
-        return { response, data };
-      }
-    });
+    if (LOCAL_PROXY_ENABLED) {
+      attempts.push({
+        name: 'proxy local',
+        run: async () => {
+          const response = await fetchWithTimeout(`/proxy?url=${encodeURIComponent(target)}`, {
+            cache: 'no-store',
+            credentials: 'omit'
+          }, 8000);
+          const text = await response.text();
+          let data = null;
+          try { data = JSON.parse(text); } catch (error) {}
+          return { response, data };
+        }
+      });
+    }
 
     attempts.push({
       name: 'allorigins',

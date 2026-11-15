@@ -33,6 +33,19 @@
   const ALLORIGINS_PROXY = 'https://api.allorigins.win/raw?url=';
   const CORSPROXY_PROXY = 'https://corsproxy.io/?';
   const LOCAL_PROXY = '/proxy?url=';
+  // El proxy local solo existe cuando sirve server.py. En un host estatico
+  // (GitHub Pages, Netlify...) no se intenta para no generar 404 inutiles.
+  const DASHBOARD_PORT = '4173';
+  const IS_LOCAL_NETWORK_HOST = (() => {
+    const host = String(location.hostname || '');
+    if (location.port === DASHBOARD_PORT) return true;
+    if (/^(localhost|127\.0\.0\.1|0\.0\.0\.0|::1)$/i.test(host)) return true;
+    return /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+  })();
+
+  function localProxyAttempt(url) {
+    return IS_LOCAL_NETWORK_HOST ? `${LOCAL_PROXY}${encodeURIComponent(url)}` : null;
+  }
   const CBBI_URL = 'https://colintalkscrypto.com/cbbi/data/latest.json';
   const DUNE_QUERY_ID = 3265994;
   const SESSION_STALE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -630,7 +643,9 @@
   }
 
   async function fetchPublic(url, options = {}) {
-    const attempts = [`${LOCAL_PROXY}${encodeURIComponent(url)}`];
+    const attempts = [];
+    const local = localProxyAttempt(url);
+    if (local) attempts.push(local);
     const userProxy = externalProxyAttempt(url, attempts);
     if (userProxy) attempts.push(userProxy);
     attempts.push(url);
@@ -639,7 +654,9 @@
   }
 
   async function fetchProtected(url, options = {}) {
-    const attempts = [`${LOCAL_PROXY}${encodeURIComponent(url)}`];
+    const attempts = [];
+    const local = localProxyAttempt(url);
+    if (local) attempts.push(local);
     const userProxy = externalProxyAttempt(url, attempts);
     if (userProxy) attempts.push(userProxy);
     attempts.push(url);
@@ -2276,12 +2293,16 @@
       applyCbbi(cached, true);
     }
     try {
-      const response = await fetchFirst([
-        '/cbbi',
-        `${LOCAL_PROXY}${encodeURIComponent(CBBI_URL)}`,
-        `${ALLORIGINS_PROXY}${encodeURIComponent(CBBI_URL)}`,
-        CBBI_URL
-      ], { timeout: 15000 });
+      const attempts = [];
+      if (IS_LOCAL_NETWORK_HOST) {
+        attempts.push('/cbbi');
+        attempts.push(`${LOCAL_PROXY}${encodeURIComponent(CBBI_URL)}`);
+      }
+      // El JSON de CBBI pesa ~2.9 MB y tarda ~10 s: en host estatico conviene
+      // pedirlo directo (manda CORS *) y con mas margen que el resto.
+      attempts.push(CBBI_URL);
+      attempts.push(`${ALLORIGINS_PROXY}${encodeURIComponent(CBBI_URL)}`);
+      const response = await fetchFirst(attempts, { timeout: 30000, ttl: 300000 });
       const latest = extractLatestCbbi(response);
       if (!latest) throw new Error('Formato CBBI no reconocido');
 
@@ -9379,8 +9400,12 @@
 
   async function binanceJson(path, timeoutMs = 15000) {
     const target = `https://api.binance.com${path}`;
+    const attempts = [];
+    const local = localProxyAttempt(target);
+    if (local) attempts.push(local);
+    attempts.push(target);
     return fetchFirst(
-      [`/proxy?url=${encodeURIComponent(target)}`, target],
+      attempts,
       { timeout: timeoutMs, cacheKey: `public ${target}` }
     );
   }
@@ -10371,8 +10396,12 @@
   }
 
   async function tcsFetchJson(target, timeoutMs = 15000) {
+    const attempts = [];
+    const local = localProxyAttempt(target);
+    if (local) attempts.push(local);
+    attempts.push(target);
     return fetchFirst(
-      [`/proxy?url=${encodeURIComponent(target)}`, target],
+      attempts,
       { timeout: timeoutMs, cacheKey: `public ${target}` }
     );
   }
@@ -12882,17 +12911,14 @@
   const initialConfig = loadConfig();
 
   async function fetchJson(url, timeoutMs = 15000) {
+    const attempts = [];
+    const local = localProxyAttempt(url);
+    if (local) attempts.push(local);
+    attempts.push(url);
+    attempts.push(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
     if (window.QuantFetch && typeof window.QuantFetch.first === 'function') {
-      return window.QuantFetch.first(
-        [`/proxy?url=${encodeURIComponent(url)}`, url, `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`],
-        { timeout: timeoutMs, cacheKey: `public ${url}` }
-      );
+      return window.QuantFetch.first(attempts, { timeout: timeoutMs, cacheKey: `public ${url}` });
     }
-    const attempts = [
-      `/proxy?url=${encodeURIComponent(url)}`,
-      url,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
-    ];
     let lastError = null;
     for (const target of attempts) {
       const controller = new AbortController();
