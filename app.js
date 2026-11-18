@@ -47,6 +47,10 @@
     return IS_LOCAL_NETWORK_HOST ? `${LOCAL_PROXY}${encodeURIComponent(url)}` : null;
   }
 
+  // app.js se divide en varios IIFEs: los modulos posteriores (ATR journal,
+  // estudio TCS, backtester) no ven este scope, asi que se expone en window.
+  window.QuantLocalProxy = localProxyAttempt;
+
   // CoinGecko bloquea por CORS el origen de GitHub Pages aunque anuncie "*"
   // en la respuesta. En host estatico se prueba primero el proxy CORS publico
   // para no dejar errores en consola ni esperar al fallo directo.
@@ -9415,13 +9419,31 @@
   async function binanceJson(path, timeoutMs = 15000) {
     const target = `https://api.binance.com${path}`;
     const attempts = [];
-    const local = localProxyAttempt(target);
+    const local = typeof window.QuantLocalProxy === 'function' ? window.QuantLocalProxy(target) : null;
     if (local) attempts.push(local);
     attempts.push(target);
-    return fetchFirst(
-      attempts,
-      { timeout: timeoutMs, cacheKey: `public ${target}` }
-    );
+    if (window.QuantFetch && typeof window.QuantFetch.first === 'function') {
+      return window.QuantFetch.first(attempts, { timeout: timeoutMs, cacheKey: `public ${target}` });
+    }
+    let lastError = null;
+    for (const url of attempts) {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(url, {
+          cache: 'no-store',
+          credentials: 'omit',
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json();
+      } catch (error) {
+        lastError = error;
+      } finally {
+        window.clearTimeout(timer);
+      }
+    }
+    throw lastError || new Error('Binance no respondió');
   }
 
   // El botón flotante no debe tapar los toasts ni la navegación móvil.
@@ -10411,13 +10433,31 @@
 
   async function tcsFetchJson(target, timeoutMs = 15000) {
     const attempts = [];
-    const local = localProxyAttempt(target);
+    const local = typeof window.QuantLocalProxy === 'function' ? window.QuantLocalProxy(target) : null;
     if (local) attempts.push(local);
     attempts.push(target);
-    return fetchFirst(
-      attempts,
-      { timeout: timeoutMs, cacheKey: `public ${target}` }
-    );
+    if (window.QuantFetch && typeof window.QuantFetch.first === 'function') {
+      return window.QuantFetch.first(attempts, { timeout: timeoutMs, cacheKey: `public ${target}` });
+    }
+    let lastError = null;
+    for (const url of attempts) {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(url, {
+          cache: 'no-store',
+          credentials: 'omit',
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json();
+      } catch (error) {
+        lastError = error;
+      } finally {
+        window.clearTimeout(timer);
+      }
+    }
+    throw lastError || new Error('Sin respuesta de la API');
   }
 
   const studioStyle = document.createElement('style');
@@ -12926,7 +12966,7 @@
 
   async function fetchJson(url, timeoutMs = 15000) {
     const attempts = [];
-    const local = localProxyAttempt(url);
+    const local = typeof window.QuantLocalProxy === 'function' ? window.QuantLocalProxy(url) : null;
     if (local) attempts.push(local);
     attempts.push(url);
     attempts.push(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
