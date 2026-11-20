@@ -14316,3 +14316,814 @@
     }, 1000);
 })();
 
+// ============================================================================
+// PANEL 6 AUTO-INYECTABLE: PLAYBOOK TÁCTICO INSTITUCIONAL & FILTROS DE EJECUCIÓN
+// Integrado como PANEL REAL en la barra lateral (índice 06, debajo de Airdrops).
+// 4 pestañas: Shorts parabólicos · Fibonacci DCA · Radar Binance Alpha 100X · MM
+// ============================================================================
+(function initPanel6TacticalPlaybook() {
+    // Idempotencia: limpia inyecciones previas.
+    ['panel-playbook', 'nav-panel-playbook', 'mnav-panel-playbook'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+    });
+
+    function esc(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    function pfApplyCoinGeckoKey(url) {
+        if (typeof window.QuantCoingeckoKey === 'function' && String(url).includes('api.coingecko.com')) {
+            const key = window.QuantCoingeckoKey();
+            if (key) {
+                const sep = String(url).includes('?') ? '&' : '?';
+                return url + sep + 'x_cg_demo_api_key=' + encodeURIComponent(key);
+            }
+        }
+        return url;
+    }
+
+    async function pfFetch(url, timeoutMs = 20000) {
+        url = pfApplyCoinGeckoKey(url);
+        const attempts = [];
+        const local = typeof window.QuantLocalProxy === 'function' ? window.QuantLocalProxy(url) : null;
+        if (local) attempts.push(local);
+        attempts.push(url);
+        attempts.push('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
+
+        if (window.QuantFetch && typeof window.QuantFetch.first === 'function') {
+            return window.QuantFetch.first(attempts, { timeout: timeoutMs, cacheKey: 'p6 ' + url });
+        }
+
+        let lastError = null;
+        for (const target of attempts) {
+            const controller = new AbortController();
+            const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const response = await fetch(target, { cache: 'no-store', credentials: 'omit', signal: controller.signal });
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                return await response.json();
+            } catch (error) {
+                lastError = error;
+            } finally {
+                window.clearTimeout(timer);
+            }
+        }
+        throw lastError || new Error('Sin respuesta de la API');
+    }
+
+    function fmtUSD(num) {
+        if (num === null || num === undefined || isNaN(num)) return '-';
+        const abs = Math.abs(num);
+        if (abs >= 1e9) return '$' + (num / 1e9).toFixed(2) + 'B';
+        if (abs >= 1e6) return '$' + (num / 1e6).toFixed(2) + 'M';
+        if (abs >= 1e3) return '$' + (num / 1e3).toFixed(1) + 'K';
+        return '$' + Number(num).toFixed(2);
+    }
+
+    function fmtPct(val, digits = 2) {
+        if (val === null || val === undefined || isNaN(val)) return 'N/A';
+        return (val >= 0 ? '+' : '') + Number(val).toFixed(digits) + '%';
+    }
+
+    // ------------------------------------------------------------------------
+    // SECCIÓN DEL PANEL
+    // ------------------------------------------------------------------------
+    const section = document.createElement('section');
+    section.className = 'view-panel';
+    section.id = 'panel-playbook';
+    section.setAttribute('data-panel', 'playbook');
+    section.setAttribute('aria-labelledby', 'playbook-title');
+
+    section.innerHTML = `
+        <header class="section-heading">
+            <div class="section-heading-copy">
+                <div class="eyebrow"><span class="live-dot"></span> Panel 06 / Playbook táctico</div>
+                <h2 id="playbook-title">Playbook Táctico Institucional</h2>
+                <p>Shorts parabólicos · Fibonacci DCA · Radar Binance Alpha 100X · Manipulación de Market Makers.</p>
+            </div>
+            <div class="heading-actions">
+                <span class="access-badge auto"><span class="access-dot"></span>Binance Futures + CoinGecko</span>
+            </div>
+        </header>
+
+        <div class="card" style="padding:16px;margin-bottom:0;">
+            <div id="p6-tabbar" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;">
+                <button class="p6-tab" data-p6-tab="1" style="background:#3b82f6;color:#fff;border:none;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">🎯 Cazador de Shorts</button>
+                <button class="p6-tab" data-p6-tab="2" style="background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">📐 Fibonacci DCA</button>
+                <button class="p6-tab" data-p6-tab="3" style="background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">🚀 Radar Binance Alpha 100X</button>
+                <button class="p6-tab" data-p6-tab="4" style="background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:8px 12px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">🐋 Market Makers</button>
+            </div>
+
+            <!-- PESTAÑA 1 -->
+            <div class="p6-pane" data-p6-pane="1">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                    <button id="p6-scan-shorts" style="background:#3b82f6;color:#fff;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">🔍 Escanear Top Ganadores Futures</button>
+                    <input id="p6-short-symbol" type="text" placeholder="o escribe un ticker (ej. PEPE)" style="background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px 10px;border-radius:6px;font-size:12px;width:180px;" />
+                    <button id="p6-validate-symbol" style="background:#10b981;color:#000;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">Validar Ticker</button>
+                </div>
+                <div id="p6-shorts-status" style="font-size:11px;color:#9ca3af;margin-bottom:8px;">Pulsa "Escanear" para ver el Top 15 de Binance Futures por subida 24h.</div>
+                <div id="p6-shorts-result" style="margin-bottom:10px;"></div>
+                <div style="overflow-x:auto;border:1px solid #1f2937;border-radius:8px;max-height:420px;overflow-y:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left;">
+                        <thead style="position:sticky;top:0;background:#151924;color:#9ca3af;border-bottom:1px solid #1f2937;z-index:2;">
+                            <tr>
+                                <th style="padding:9px;">#</th><th style="padding:9px;">Par</th><th style="padding:9px;">Precio</th>
+                                <th style="padding:9px;">24h %</th><th style="padding:9px;">Vol. 24h (USDT)</th><th style="padding:9px;">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="p6-shorts-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- PESTAÑA 2 -->
+            <div class="p6-pane" data-p6-pane="2" style="display:none;">
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:14px;">
+                    <label style="font-size:11px;color:#9ca3af;">Activo (opcional)<input id="p6-fib-asset" type="text" placeholder="BTC" style="width:100%;margin-top:4px;background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px;border-radius:6px;font-size:12px;" /></label>
+                    <label style="font-size:11px;color:#9ca3af;">Mínimo del Impulso (Low)<input id="p6-fib-low" type="number" step="any" placeholder="25000" style="width:100%;margin-top:4px;background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px;border-radius:6px;font-size:12px;" /></label>
+                    <label style="font-size:11px;color:#9ca3af;">Máximo del Impulso (High)<input id="p6-fib-high" type="number" step="any" placeholder="40000" style="width:100%;margin-top:4px;background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px;border-radius:6px;font-size:12px;" /></label>
+                    <label style="font-size:11px;color:#9ca3af;">Capital Total (USD)<input id="p6-fib-capital" type="number" step="any" placeholder="10000" style="width:100%;margin-top:4px;background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px;border-radius:6px;font-size:12px;" /></label>
+                </div>
+                <div id="p6-fib-output" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;"></div>
+            </div>
+
+            <!-- PESTAÑA 3 · RADAR BINANCE ALPHA 100X -->
+            <div class="p6-pane" data-p6-pane="3" style="display:none;">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                    <button id="p6-scan-alpha" style="background:#facc15;color:#000;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">🔍 Escanear Binance Alpha (Ready 100X)</button>
+                    <button id="p6-alpha-refresh" style="background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">🔄 Refrescar</button>
+                </div>
+                <div id="p6-alpha-status" style="font-size:11px;color:#9ca3af;margin-bottom:8px;">Pulsa "Escanear" para puntuar cada activo de Binance Alpha según su probabilidad de explotar (0–100%).</div>
+                <div id="p6-alpha-xray" style="display:none;margin-bottom:10px;"></div>
+                <div style="overflow-x:auto;border:1px solid #1f2937;border-radius:8px;max-height:440px;overflow-y:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left;">
+                        <thead style="position:sticky;top:0;background:#151924;color:#9ca3af;border-bottom:1px solid #1f2937;z-index:2;">
+                            <tr>
+                                <th style="padding:9px;">#</th><th style="padding:9px;">Activo Alpha</th><th style="padding:9px;">Curva 7d</th>
+                                <th style="padding:9px;">Readiness 100X</th><th style="padding:9px;">Desglose</th><th style="padding:9px;">Vol. 24h</th><th style="padding:9px;">Análisis</th>
+                            </tr>
+                        </thead>
+                        <tbody id="p6-alpha-tbody"></tbody>
+                    </table>
+                </div>
+
+                <div style="border-top:1px solid #1f2937;padding-top:12px;margin-top:14px;">
+                    <h4 style="margin:0 0 8px;color:#10b981;font-size:13px;">➕ Añadir a Watchlist 100X</h4>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                        <input id="p6-wl-ticker" type="text" placeholder="Ticker (SOL)" style="background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px;border-radius:6px;font-size:12px;width:110px;" />
+                        <input id="p6-wl-days" type="number" placeholder="Días en rango" style="background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px;border-radius:6px;font-size:12px;width:120px;" />
+                        <input id="p6-wl-ceiling" type="text" placeholder="Techo Test Pump" style="background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px;border-radius:6px;font-size:12px;width:130px;" />
+                        <input id="p6-wl-notes" type="text" placeholder="Notas" style="background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px;border-radius:6px;font-size:12px;width:180px;" />
+                        <button id="p6-wl-add" style="background:#3b82f6;color:#fff;border:none;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">Guardar</button>
+                    </div>
+                    <div id="p6-wl-status" style="font-size:11px;color:#9ca3af;margin-bottom:8px;"></div>
+                    <div style="overflow-x:auto;border:1px solid #1f2937;border-radius:8px;">
+                        <table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left;">
+                            <thead style="background:#151924;color:#9ca3af;"><tr><th style="padding:8px;">Ticker</th><th style="padding:8px;">Días en rango</th><th style="padding:8px;">Techo Test Pump</th><th style="padding:8px;">Notas</th><th style="padding:8px;"></th></tr></thead>
+                            <tbody id="p6-wl-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PESTAÑA 4 -->
+            <div class="p6-pane" data-p6-pane="4" style="display:none;">
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;" id="p6-mm-grid"></div>
+            </div>
+        </div>
+    `;
+
+    // Inyectar el panel después de Airdrops.
+    const airdrops = document.getElementById('panel-airdrops');
+    if (airdrops && airdrops.parentElement) {
+        airdrops.parentElement.appendChild(section);
+    } else {
+        document.body.appendChild(section);
+    }
+
+    // ------------------------------------------------------------------------
+    // ENLACES DE NAVEGACIÓN (barra lateral + nav móvil)
+    // ------------------------------------------------------------------------
+    function makeNavLink() {
+        const a = document.createElement('a');
+        a.className = 'nav-link';
+        a.href = '#panel-playbook';
+        a.setAttribute('data-panel-target', 'panel-playbook');
+        a.innerHTML = `
+            <span class="nav-index">06</span>
+            <span class="nav-icon"><i data-lucide="target"></i></span>
+            <span class="nav-copy"><strong>Playbook</strong><small>Shorts, DCA y MM</small></span>
+            <i class="nav-chevron" data-lucide="chevron-right"></i>`;
+        a.addEventListener('click', (e) => {
+            e.preventDefault();
+            const sidebar = document.getElementById('app-sidebar');
+            const scrim = document.getElementById('sidebar-scrim');
+            if (sidebar) sidebar.classList.remove('is-open');
+            if (scrim) scrim.classList.remove('is-open');
+            if (window.location.hash === '#panel-playbook') {
+                const panel = document.getElementById('panel-playbook');
+                document.querySelectorAll('[data-panel-target]').forEach((l) => l.classList.toggle('is-active', l.dataset.panelTarget === 'panel-playbook'));
+                document.querySelectorAll('.view-panel').forEach((p) => { if (p !== panel) p.classList.remove('is-active'); });
+                if (panel) panel.classList.add('is-active');
+            } else {
+                window.location.hash = 'panel-playbook';
+            }
+        });
+        return a;
+    }
+
+    const sideNav = document.querySelector('nav.primary-nav a[data-panel-target="panel-airdrops"]');
+    if (sideNav) sideNav.insertAdjacentElement('afterend', makeNavLink());
+    const mobileNav = document.querySelector('.mobile-nav a[data-panel-target="panel-airdrops"]');
+    if (mobileNav) mobileNav.insertAdjacentElement('afterend', makeNavLink());
+
+    if (window.lucide && typeof window.lucide.createIcons === 'function') window.lucide.createIcons();
+
+    // ------------------------------------------------------------------------
+    // CAMBIO DE PESTAÑAS
+    // ------------------------------------------------------------------------
+    function switchTab(tab) {
+        section.querySelectorAll('.p6-tab').forEach((b) => {
+            const active = b.getAttribute('data-p6-tab') === tab;
+            b.style.background = active ? '#3b82f6' : '#1f2937';
+            b.style.color = active ? '#fff' : '#d1d5db';
+            b.style.border = active ? 'none' : '1px solid #374151';
+        });
+        section.querySelectorAll('.p6-pane').forEach((p) => {
+            p.style.display = p.getAttribute('data-p6-pane') === tab ? 'block' : 'none';
+        });
+    }
+
+    section.querySelector('#p6-tabbar').addEventListener('click', (e) => {
+        const tab = e.target.closest('.p6-tab');
+        if (tab) switchTab(tab.getAttribute('data-p6-tab'));
+    });
+
+    // ------------------------------------------------------------------------
+    // PESTAÑA 1 · CAZADOR DE SHORTS PARABÓLICOS
+    // ------------------------------------------------------------------------
+    async function scanTopGainers() {
+        const status = document.getElementById('p6-shorts-status');
+        const tbody = document.getElementById('p6-shorts-tbody');
+        status.innerHTML = '⏳ Descargando ticker/24hr de Binance Futures...';
+        tbody.innerHTML = '';
+        try {
+            const data = await pfFetch('https://fapi.binance.com/fapi/v1/ticker/24hr', 20000);
+            if (!Array.isArray(data)) throw new Error('Formato inesperado de Binance Futures');
+            const usdt = data
+                .filter((t) => String(t.symbol || '').endsWith('USDT'))
+                .map((t) => ({ symbol: t.symbol, lastPrice: Number(t.lastPrice), pct: Number(t.priceChangePercent), quoteVol: Number(t.quoteVolume) }))
+                .filter((t) => Number.isFinite(t.pct))
+                .sort((a, b) => b.pct - a.pct)
+                .slice(0, 15);
+            renderShortsRows(usdt);
+            status.innerHTML = `✅ Top ${usdt.length} pares USDT por subida 24h. Haz clic en una fila (o escribe un ticker) para validar en profundidad.`;
+        } catch (err) {
+            status.innerHTML = `<span style="color:#ef4444;">⚠️ ${esc(err.message)}</span>`;
+        }
+    }
+
+    function renderShortsRows(list) {
+        const tbody = document.getElementById('p6-shorts-tbody');
+        if (!list.length) {
+            tbody.innerHTML = '<tr><td colspan="6" style="padding:14px;color:#9ca3af;">Sin datos.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = list.map((t, i) => {
+            const hot = t.pct >= 200 ? 'rgba(153,27,27,0.35)' : (t.pct >= 100 ? 'rgba(120,53,15,0.28)' : 'transparent');
+            const badge = t.pct >= 200 ? '🔥 +200%' : (t.pct >= 100 ? '🚀 +100%' : '');
+            return `<tr style="border-bottom:1px solid #1f2937;background:${hot};cursor:pointer;" data-p6-short-row="${esc(t.symbol)}">
+                <td style="padding:8px;color:#6b7280;">${i + 1}</td>
+                <td style="padding:8px;font-weight:bold;color:#fff;">${esc(t.symbol)}</td>
+                <td style="padding:8px;color:#d1d5db;">${Number(t.lastPrice).toLocaleString('en-US', { maximumFractionDigits: 6 })}</td>
+                <td style="padding:8px;"><strong style="color:${t.pct >= 0 ? '#10b981' : '#ef4444'};">${fmtPct(t.pct)}</strong> ${badge}</td>
+                <td style="padding:8px;color:#60a5fa;">${fmtUSD(t.quoteVol)}</td>
+                <td style="padding:8px;"><button data-p6-short-validate="${esc(t.symbol)}" style="background:#3b82f6;color:#fff;border:none;padding:4px 9px;border-radius:5px;cursor:pointer;font-size:11px;">Validar</button></td>
+            </tr>`;
+        }).join('');
+    }
+
+    async function validateShort(symbolRaw) {
+        let sym = String(symbolRaw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+        if (sym.endsWith('USDT')) sym = sym.slice(0, -4);
+        if (!/^[A-Z0-9]{2,15}$/.test(sym)) {
+            document.getElementById('p6-shorts-result').innerHTML = '<div style="color:#f59e0b;">Ticker no válido.</div>';
+            return;
+        }
+        const resultEl = document.getElementById('p6-shorts-result');
+        resultEl.innerHTML = `<div style="color:#9ca3af;font-size:12px;">⏳ Validando ${esc(sym)}USDT (funding, open interest y datos CoinGecko)...</div>`;
+
+        try {
+            const [premium, oi, cg] = await Promise.allSettled([
+                pfFetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${sym}USDT`, 15000),
+                pfFetch(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${sym}USDT`, 15000),
+                pfFetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&symbols=${encodeURIComponent(sym.toLowerCase())}&price_change_percentage=7d,30d`, 20000)
+            ]);
+
+            const fundingRate = premium.status === 'fulfilled' && premium.value ? Number(premium.value.lastFundingRate) : null;
+            const openInterest = oi.status === 'fulfilled' && oi.value ? Number(oi.value.openInterest) : null;
+            const cgList = cg.status === 'fulfilled' && Array.isArray(cg.value) ? cg.value : [];
+            const coin = cgList.find((c) => String(c.symbol).toUpperCase() === sym) || cgList[0] || null;
+
+            const price24h = coin && Number.isFinite(coin.price_change_percentage_24h) ? coin.price_change_percentage_24h : null;
+            const pct7d = coin ? Number(coin.price_change_percentage_7d_in_currency) : null;
+            const pct30d = coin ? Number(coin.price_change_percentage_30d_in_currency) : null;
+            const marketCap = coin ? Number(coin.market_cap) : null;
+            const volume = coin ? Number(coin.total_volume) : null;
+            const currentPrice = coin ? Number(coin.current_price) : null;
+            const ath = coin ? Number(coin.ath) : null;
+
+            const rows = [];
+            const push = (ok, warn, text) => rows.push({ ok, warn, na: /N\/A/.test(text), text });
+
+            const parabolic = (price24h != null && price24h > 200);
+            push(parabolic, !parabolic && price24h != null && price24h > 100, `Subida 24h > 200% (parabólica): ${price24h == null ? 'N/A' : fmtPct(price24h)}`);
+
+            const perf = (pct7d != null && pct7d > 500) && (pct30d != null && pct30d > 700);
+            push(perf, false, `Rendimiento 7D > 500% y 30D > 700%: ${fmtPct(pct7d)} / ${fmtPct(pct30d)}`);
+
+            const liqOk = (marketCap != null && marketCap > 100e6);
+            push(liqOk, !liqOk, `Market Cap > $100M (evitar baja liquidez): ${fmtUSD(marketCap)} · Vol. 24h ${fmtUSD(volume)}`);
+
+            const belowAth = (ath != null && currentPrice != null && (1 - currentPrice / ath) > 0.5);
+            push(!belowAth, belowAth, `Regla ATH: ${ath == null || currentPrice == null ? 'N/A' : `actual ${fmtUSD(currentPrice)} vs ATH ${fmtUSD(ath)} (${fmtPct(((currentPrice / ath) - 1) * 100)})`}`);
+
+            const squeeze = (fundingRate != null && fundingRate < -0.0005);
+            push(!squeeze, squeeze, `Riesgo short squeeze: funding ${fundingRate == null ? 'N/A' : fmtPct(fundingRate * 100)} (alerta si < -0.05%)`);
+
+            const oiNote = openInterest == null ? 'Open Interest: N/A' : `Open Interest: ${fmtUSD(openInterest)}`;
+
+            resultEl.innerHTML = `
+                <div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:12px;margin-bottom:6px;">
+                    <div style="font-size:13px;font-weight:bold;color:#fff;margin-bottom:8px;">🔍 Validación profunda: ${esc(sym)}USDT</div>
+                    <div style="display:grid;gap:5px;font-size:12px;">
+                        ${rows.map((r) => {
+                            const icon = r.na ? '⚪' : (r.warn ? '⚠️' : (r.ok ? '✅' : '❌'));
+                            const color = r.na ? '#9ca3af' : (r.warn ? '#f59e0b' : (r.ok ? '#10b981' : '#ef4444'));
+                            return `<div style="color:${color};">${icon} ${esc(r.text)}</div>`;
+                        }).join('')}
+                        <div style="color:#9ca3af;">ℹ️ ${esc(oiNote)}</div>
+                    </div>
+                    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:12px;color:#d1d5db;cursor:pointer;">
+                        <input type="checkbox" id="p6-short-confirm" style="margin-top:2px;" />
+                        <span>Confirmo debilidad, rechazo o ruptura de estructura en el gráfico (No entrar en máximos crecientes)</span>
+                    </label>
+                    <div id="p6-short-verdict" style="margin-top:10px;font-size:12px;color:#9ca3af;">Marca la casilla para obtener el veredicto final.</div>
+                </div>`;
+
+            const confirmBox = document.getElementById('p6-short-confirm');
+            const verdict = document.getElementById('p6-short-verdict');
+            const hardFail = belowAth;
+            const warnings = rows.filter((r) => r.warn).length;
+            const passes = rows.filter((r) => r.ok).length;
+            const total = rows.length;
+
+            const updateVerdict = () => {
+                if (hardFail) {
+                    verdict.innerHTML = '<span style="color:#ef4444;font-weight:bold;">❌ NO SHORTEAR: Activo >50% debajo de su ATH.</span>';
+                    return;
+                }
+                if (!confirmBox.checked) {
+                    verdict.innerHTML = '<span style="color:#9ca3af;">Marca la casilla de confirmación manual para continuar.</span>';
+                    return;
+                }
+                if (warnings > 0) {
+                    verdict.innerHTML = '<span style="color:#f59e0b;font-weight:bold;">⚠️ Setup con riesgos: ' + warnings + ' advertencia(s) activa(s). Reduce tamaño o espera confirmación.</span>';
+                } else if (passes >= total - 1) {
+                    verdict.innerHTML = '<span style="color:#10b981;font-weight:bold;">✅ Setup válido bajo filtros. Gestiona tamaño y stop.</span>';
+                } else {
+                    verdict.innerHTML = '<span style="color:#ef4444;font-weight:bold;">❌ No cumple los filtros mínimos.</span>';
+                }
+            };
+            confirmBox.addEventListener('change', updateVerdict);
+            updateVerdict();
+        } catch (err) {
+            resultEl.innerHTML = `<div style="color:#ef4444;">⚠️ ${esc(err.message)}</div>`;
+        }
+    }
+
+    document.getElementById('p6-scan-shorts').onclick = scanTopGainers;
+    document.getElementById('p6-validate-symbol').onclick = () => validateShort(document.getElementById('p6-short-symbol').value);
+
+    document.getElementById('p6-shorts-tbody').addEventListener('click', (e) => {
+        const valBtn = e.target.closest('[data-p6-short-validate]');
+        const row = e.target.closest('[data-p6-short-row]');
+        if (valBtn) validateShort(valBtn.getAttribute('data-p6-short-validate'));
+        else if (row) validateShort(row.getAttribute('data-p6-short-row'));
+    });
+
+    // ------------------------------------------------------------------------
+    // PESTAÑA 2 · FIBONACCI + PLAN DCA
+    // ------------------------------------------------------------------------
+    const FIB_LEVELS = [
+        { ratio: 0.382, title: '38.2% — Fortaleza Agresiva', psych: 'Compradores hambrientos. Tendencia fuerte, pero no es precio de ganga.', dca: 0 },
+        { ratio: 0.5, title: '50.0% — Territorio Neutral', psych: 'Mitad del movimiento. Zona de indecisión, requiere confirmación.', dca: 0 },
+        { ratio: 0.618, title: '61.8% — La Proporción Áurea', psych: 'Zona de acumulación institucional. Equilibrio óptimo entre riesgo y oportunidad.', dca: 0.4 },
+        { ratio: 0.786, title: '78.6% — El Verdadero Regalo', psych: 'Pánico extremo / mejor punto de entrada histórica.', dca: 0.6 }
+    ];
+
+    function renderFib() {
+        const out = document.getElementById('p6-fib-output');
+        const low = Number(document.getElementById('p6-fib-low').value);
+        const high = Number(document.getElementById('p6-fib-high').value);
+        const capital = Number(document.getElementById('p6-fib-capital').value);
+
+        if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) {
+            out.innerHTML = '<div style="grid-column:1/-1;color:#9ca3af;font-size:12px;">Introduce Low y High válidos (High > Low) para calcular los retrocesos.</div>';
+            return;
+        }
+        const range = high - low;
+        const cap = Number.isFinite(capital) && capital > 0 ? capital : null;
+
+        const cards = FIB_LEVELS.map((lvl) => {
+            const price = high - range * lvl.ratio;
+            let dcaHtml = '';
+            if (lvl.dca > 0 && cap) {
+                const amount = cap * lvl.dca;
+                const units = price > 0 ? amount / price : 0;
+                dcaHtml = `<div style="margin-top:8px;padding:8px;background:#0b0e14;border-radius:6px;font-size:11px;">
+                    <div style="color:#10b981;font-weight:bold;">DCA ${Math.round(lvl.dca * 100)}% = ${fmtUSD(amount)}</div>
+                    <div style="color:#9ca3af;">≈ ${units.toFixed(units < 0.01 ? 6 : 2)} unidades a ${price.toLocaleString('en-US', { maximumFractionDigits: 6 })}</div>
+                </div>`;
+            }
+            return `<div style="background:#111827;border:1px solid ${lvl.dca > 0 ? '#3b82f6' : '#1f2937'};border-radius:8px;padding:12px;">
+                <div style="color:#3b82f6;font-weight:bold;font-size:12px;">${lvl.title}</div>
+                <div style="color:#fff;font-size:20px;font-weight:bold;margin:6px 0;">${price.toLocaleString('en-US', { maximumFractionDigits: 6 })}</div>
+                <div style="color:#9ca3af;font-size:11px;">${esc(lvl.psych)}</div>
+                ${dcaHtml}
+            </div>`;
+        }).join('');
+
+        const invalidation = `<div style="grid-column:1/-1;background:#3b0d0d;border:1px solid #ef4444;border-radius:8px;padding:12px;color:#fca5a5;font-size:12px;">
+            ⛔ <strong>Invalidación:</strong> un cierre sólido por debajo del <strong>78.6% (${(high - range * 0.786).toLocaleString('en-US', { maximumFractionDigits: 6 })})</strong> invalida la tesis alcista y activa el plan de salida.
+        </div>`;
+
+        out.innerHTML = cards + invalidation;
+    }
+
+    ['p6-fib-low', 'p6-fib-high', 'p6-fib-capital'].forEach((id) => {
+        document.getElementById(id).addEventListener('input', renderFib);
+    });
+    renderFib();
+
+    // ------------------------------------------------------------------------
+    // PESTAÑA 3 · RADAR BINANCE ALPHA 100X (automático + gráficos)
+    // ------------------------------------------------------------------------
+    const WL_KEY = 'crypto_100x_testpump_watchlist_v1';
+
+    let alpha100x = [];
+    let alpha100xAt = 0;
+
+    function sparklineSvg(points, w, h, color) {
+        if (!Array.isArray(points) || points.length < 2) return '';
+        const vals = points.map(Number).filter(Number.isFinite);
+        if (vals.length < 2) return '';
+        const min = Math.min(...vals), max = Math.max(...vals);
+        const range = (max - min) || 1;
+        const pts = vals.map((v, i) => {
+            const x = 1 + (i / (vals.length - 1)) * (w - 2);
+            const y = h - 2 - ((v - min) / range) * (h - 4);
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+        }).join(' ');
+        return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5"/></svg>`;
+    }
+
+    const MET_ICON = { yes: '✅', partial: '⚠️', no: '❌' };
+    const MET_COLOR = { yes: '#10b981', partial: '#f59e0b', no: '#ef4444' };
+    const MET_SHORT = { acumulacion: 'Acum', noExplotada: 'NoExp', testPump: 'TPump', liquidez: 'Liq' };
+
+    function computeReadiness(coin) {
+        const sparkRaw = coin.sparkline_in_7d && Array.isArray(coin.sparkline_in_7d.price) ? coin.sparkline_in_7d.price : [];
+        const spark = sparkRaw.map(Number).filter(Number.isFinite);
+        const pct7d = coin.price_change_percentage_7d_in_currency;
+        const pct30d = coin.price_change_percentage_30d_in_currency;
+        const mcap = Number(coin.market_cap);
+        const vol = Number(coin.total_volume);
+
+        const parts = { acumulacion: 0, noExplotada: 0, testPump: 0, liquidez: 0 };
+        const checks = [];
+
+        // 1) Acumulación (0-25): baja volatilidad del sparkline 7d
+        let cv = null;
+        if (spark.length >= 8) {
+            const mean = spark.reduce((a, b) => a + b, 0) / spark.length;
+            const std = Math.sqrt(spark.reduce((a, b) => a + (b - mean) * (b - mean), 0) / spark.length);
+            cv = mean > 0 ? std / mean : 1;
+            parts.acumulacion = Math.round(Math.max(0, Math.min(25, ((0.30 - cv) / 0.30) * 25)));
+        }
+        checks.push({
+            key: 'acumulacion', label: 'Acumulación (consolidación)', pts: parts.acumulacion, max: 25,
+            met: parts.acumulacion >= 20 ? 'yes' : (parts.acumulacion >= 10 ? 'partial' : 'no'),
+            why: cv == null
+                ? 'Sin curva de 7d suficiente para medir la consolidación.'
+                : `Volatilidad 7d (CV) ${(cv * 100).toFixed(1)}% → ${cv < 0.08 ? 'consolidación clara' : (cv < 0.2 ? 'rango moderado' : 'mucha volatilidad')}.`
+        });
+
+        // 2) No explotada aún (0-25)
+        const d7 = Number.isFinite(pct7d) ? pct7d : 999;
+        const d30 = Number.isFinite(pct30d) ? pct30d : 999;
+        if (d7 > 200 || d30 > 700) parts.noExplotada = 0;
+        else if (d7 > 100 || d30 > 300) parts.noExplotada = 10;
+        else if (d7 > 40 || d30 > 120) parts.noExplotada = 18;
+        else parts.noExplotada = 25;
+        checks.push({
+            key: 'noExplotada', label: 'No explotada aún', pts: parts.noExplotada, max: 25,
+            met: parts.noExplotada === 25 ? 'yes' : (parts.noExplotada > 0 ? 'partial' : 'no'),
+            why: `7d ${Number.isFinite(pct7d) ? fmtPct(pct7d) : 'N/A'} · 30d ${Number.isFinite(pct30d) ? fmtPct(pct30d) : 'N/A'} → ${parts.noExplotada === 25 ? 'aún no ha despegado' : (parts.noExplotada === 0 ? 'ya explotó' : 'fase intermedia')}.`
+        });
+
+        // 3) Test pump (0-25): pico del sparkline que retrajo
+        let tpMax = null, tpMedian = null, tpLast = null;
+        if (spark.length >= 8) {
+            const sorted = [...spark].sort((a, b) => a - b);
+            tpMedian = sorted[Math.floor(sorted.length / 2)];
+            tpMax = Math.max(...spark);
+            tpLast = spark[spark.length - 1];
+            if (tpMax > tpMedian * 1.20 && tpLast < tpMax) parts.testPump = 25;
+            else if (tpMax > tpMedian * 1.20) parts.testPump = 10;
+        }
+        checks.push({
+            key: 'testPump', label: 'Test Pump', pts: parts.testPump, max: 25,
+            met: parts.testPump === 25 ? 'yes' : (parts.testPump === 10 ? 'partial' : 'no'),
+            why: tpMax == null
+                ? 'Sin curva de 7d suficiente para detectar el test pump.'
+                : `Pico ${fmtUSD(tpMax)} (${fmtPct(((tpMax / tpMedian) - 1) * 100)} vs mediana) y ${tpLast < tpMax ? 'ya retrajo al rango' : 'aún no retrae'}.`
+        });
+
+        // 4) Liquidez (0-25)
+        if (mcap >= 100e6) parts.liquidez += 15;
+        else if (mcap >= 20e6) parts.liquidez += 10;
+        else if (mcap >= 5e6) parts.liquidez += 5;
+        if (vol >= 1e6) parts.liquidez += 10;
+        else if (vol >= 2e5) parts.liquidez += 5;
+        checks.push({
+            key: 'liquidez', label: 'Liquidez', pts: parts.liquidez, max: 25,
+            met: parts.liquidez >= 20 ? 'yes' : (parts.liquidez >= 10 ? 'partial' : 'no'),
+            why: `Market Cap ${fmtUSD(mcap)} + Vol. 24h ${fmtUSD(vol)}.`
+        });
+
+        const score = parts.acumulacion + parts.noExplotada + parts.testPump + parts.liquidez;
+        return { score, parts, spark, checks };
+    }
+
+    function scoreColor(s) {
+        if (s >= 75) return '#10b981';
+        if (s >= 55) return '#facc15';
+        return '#ef4444';
+    }
+
+    async function scanAlpha100x(force) {
+        const status = document.getElementById('p6-alpha-status');
+        const tbody = document.getElementById('p6-alpha-tbody');
+        const now = Date.now();
+        if (!force && alpha100x.length && (now - alpha100xAt) < 120000) {
+            renderAlpha100x();
+            return;
+        }
+        status.innerHTML = '⏳ Descargando lista Binance Alpha (con sparkline 7d) y puntuando cada activo...';
+        tbody.innerHTML = '<tr><td colspan="7" style="padding:16px;color:#9ca3af;">Cargando y calculando Readiness 100X...</td></tr>';
+        try {
+            const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&category=binance-alpha-spotlight&order=market_cap_desc&per_page=100&page=1&sparkline=true&price_change_percentage=24h,7d,30d';
+            const data = await pfFetch(url, 25000);
+            if (!Array.isArray(data) || !data.length) throw new Error('Lista vacía de Binance Alpha');
+            alpha100x = data.map((c) => ({ coin: c, r: computeReadiness(c) })).sort((a, b) => b.r.score - a.r.score);
+            alpha100xAt = now;
+            renderAlpha100x();
+            status.innerHTML = `✅ ${data.length} activos de Binance Alpha puntuados. <strong>Readiness</strong> = % de condiciones para un movimiento 100X. Pulsa <strong>🔬 90d</strong> para ver el gráfico y la afirmación de cada activo.`;
+        } catch (e) {
+            status.innerHTML = `<span style="color:#ef4444;">⚠️ ${esc(e.message)}</span>`;
+            tbody.innerHTML = `<tr><td colspan="7" style="padding:16px;color:#fca5a5;">${esc(e.message)}</td></tr>`;
+        }
+    }
+
+    function renderAlpha100x() {
+        const tbody = document.getElementById('p6-alpha-tbody');
+        if (!alpha100x.length) {
+            tbody.innerHTML = '<tr><td colspan="7" style="padding:14px;color:#9ca3af;">Sin datos. Pulsa Escanear.</td></tr>';
+            return;
+        }
+        const chip = (label, val) => `<span style="display:inline-block;font-size:9px;color:#9ca3af;background:#0b0e14;border:1px solid #1f2937;border-radius:4px;padding:1px 4px;margin:1px;">${label} ${val}</span>`;
+        tbody.innerHTML = alpha100x.map((row, i) => {
+            const c = row.coin, r = row.r;
+            const color = scoreColor(r.score);
+            const up = (c.price_change_percentage_7d_in_currency || 0) >= 0;
+            return `<tr data-p6-alpha90="${esc(c.id)}" style="border-bottom:1px solid #1f2937;background:${r.score >= 75 ? 'rgba(6,78,59,0.18)' : 'transparent'};cursor:pointer;">
+                <td style="padding:8px;color:#6b7280;">${i + 1}</td>
+                <td style="padding:8px;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <img src="${esc(c.image)}" alt="" style="width:20px;height:20px;border-radius:50%;" />
+                        <div><strong style="color:#fff;">${esc(c.symbol.toUpperCase())}</strong><div style="font-size:10px;color:#9ca3af;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(c.name)}</div></div>
+                    </div>
+                </td>
+                <td style="padding:8px;">${sparklineSvg(r.spark, 110, 30, up ? '#10b981' : '#ef4444')}<span style="font-size:10px;color:${up ? '#10b981' : '#ef4444'};">${fmtPct(c.price_change_percentage_7d_in_currency)}</span></td>
+                <td style="padding:8px;min-width:120px;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:16px;font-weight:bold;color:${color};">${r.score}%</span>
+                        <div style="flex:1;height:8px;background:#1f2937;border-radius:5px;overflow:hidden;"><div style="height:100%;width:${r.score}%;background:${color};"></div></div>
+                    </div>
+                </td>
+                <td style="padding:8px;">${r.checks.map((ch) => `<span title="${esc(ch.why)}" style="display:inline-block;font-size:9px;color:${MET_COLOR[ch.met]};background:#0b0e14;border:1px solid #1f2937;border-radius:4px;padding:1px 4px;margin:1px;cursor:help;">${MET_ICON[ch.met]} ${MET_SHORT[ch.key]} ${ch.pts}</span>`).join('')}</td>
+                <td style="padding:8px;color:#60a5fa;">${fmtUSD(c.total_volume)}</td>
+                <td style="padding:8px;"><button data-p6-alpha90="${esc(c.id)}" style="background:#facc15;color:#000;border:none;padding:4px 9px;border-radius:5px;cursor:pointer;font-size:11px;font-weight:bold;">🔬 90d</button></td>
+            </tr>`;
+        }).join('');
+    }
+
+    function xray90Svg(prices, lo, hi, max, current, testPump) {
+        const W = 620, H = 180, pad = 8;
+        const vals = prices.map((p) => Number(p[1])).filter(Number.isFinite);
+        if (vals.length < 2) return '';
+        const step = Math.max(1, Math.floor(vals.length / 160));
+        const down = [];
+        for (let i = 0; i < vals.length; i += step) down.push(vals[i]);
+        if (down[down.length - 1] !== vals[vals.length - 1]) down.push(vals[vals.length - 1]);
+        const min = Math.min(...down), maxV = Math.max(...down);
+        const range = (maxV - min) || 1;
+        const y = (v) => pad + (1 - (v - min) / range) * (H - pad * 2);
+        const pts = down.map((v, i) => `${(pad + (i / (down.length - 1)) * (W - pad * 2)).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+        const yLo = y(Math.max(lo, min));
+        const yHi = y(Math.min(hi, maxV));
+        const bandTop = Math.min(yLo, yHi);
+        const bandH = Math.abs(yHi - yLo);
+        const yCur = y(current);
+        return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:180px;background:#090d16;border-radius:8px;">
+            <rect x="${pad}" y="${bandTop}" width="${W - pad * 2}" height="${Math.max(bandH, 1)}" fill="#3b82f6" opacity="0.12"/>
+            <line x1="${pad}" y1="${yLo}" x2="${W - pad}" y2="${yLo}" stroke="#3b82f6" stroke-dasharray="4 3" stroke-width="1"/>
+            <line x1="${pad}" y1="${yHi}" x2="${W - pad}" y2="${yHi}" stroke="#3b82f6" stroke-dasharray="4 3" stroke-width="1"/>
+            <polyline points="${pts}" fill="none" stroke="#f43f5e" stroke-width="1.8"/>
+            <line x1="${pad}" y1="${yCur}" x2="${W - pad}" y2="${yCur}" stroke="#10b981" stroke-width="1" stroke-dasharray="3 3"/>
+            ${testPump ? `<text x="${W / 2}" y="14" fill="#f43f5e" font-size="11" font-weight="bold" text-anchor="middle">TEST PUMP ${fmtUSD(max)}</text>` : ''}
+            <text x="${pad}" y="${H - 3}" fill="#9ca3af" font-size="9">rango ${fmtUSD(lo)}–${fmtUSD(hi)} · actual ${fmtUSD(current)}</text>
+        </svg>`;
+    }
+
+    async function analyzeAlpha90d(coinId) {
+        const entry = alpha100x.find((r) => r.coin.id === coinId);
+        if (!entry) return;
+        const coin = entry.coin;
+        const xray = document.getElementById('p6-alpha-xray');
+        xray.style.display = 'block';
+        xray.innerHTML = `<div style="color:#9ca3af;font-size:12px;">⏳ Descargando 90 días de ${esc(coin.symbol.toUpperCase())}...</div>`;
+        xray.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        try {
+            const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=90`;
+            const hist = await pfFetch(url, 30000);
+            const prices = (hist && Array.isArray(hist.prices)) ? hist.prices : [];
+            if (prices.length < 10) throw new Error('Historial insuficiente para este activo.');
+
+            const vals = prices.map((p) => Number(p[1])).filter(Number.isFinite);
+            const sorted = [...vals].sort((a, b) => a - b);
+            const lo = sorted[Math.floor(sorted.length * 0.05)];
+            const hi = sorted[Math.floor(sorted.length * 0.95)];
+            const max = Math.max(...vals);
+            const current = vals[vals.length - 1];
+            const testPump = max > hi * 1.15 && current < max;
+            const drawdown = ((max - current) / max) * 100;
+
+            const claim = testPump
+                ? `Se detecta un <strong>Test Pump</strong> en ${fmtUSD(max)} (${fmtPct(((max / hi) - 1) * 100)} sobre el techo del rango), que ya retrajo al nivel actual.`
+                : `No se detecta un Test Pump claro sobre el rango en los últimos 90 días.`;
+
+            xray.innerHTML = `
+                <div style="background:#111827;border:1px solid #facc15;border-radius:8px;padding:12px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+                        <div style="font-weight:bold;color:#fff;">🔬 ${esc(coin.name)} (${esc(coin.symbol.toUpperCase())}) · 90 días</div>
+                        <div style="font-size:12px;color:#facc15;">Readiness ${entry.r.score}%</div>
+                    </div>
+                    ${xray90Svg(prices, lo, hi, max, current, testPump)}
+                    <div style="margin-top:10px;border-top:1px solid #1f2937;padding-top:8px;">
+                        <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">🧩 Condiciones evaluadas (qué se cumple y por qué)</div>
+                        ${entry.r.checks.map((ch) => `
+                            <div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid #1f2937;">
+                                <span style="font-size:12px;">${MET_ICON[ch.met]}</span>
+                                <div style="flex:1;">
+                                    <div style="font-size:12px;color:#fff;">${esc(ch.label)} <span style="color:${MET_COLOR[ch.met]};">${ch.pts}/${ch.max}</span></div>
+                                    <div style="font-size:10px;color:#9ca3af;">${esc(ch.why)}</div>
+                                </div>
+                            </div>`).join('')}
+                    </div>
+                    <div style="font-size:11px;color:#d1d5db;margin-top:8px;line-height:1.6;">
+                        <div>📦 Rango de acumulación (5%–95%): <strong style="color:#fff;">${fmtUSD(lo)} – ${fmtUSD(hi)}</strong></div>
+                        <div>🧪 ${claim}</div>
+                        <div>📉 Drawdown desde el máximo 90d: <strong style="color:${drawdown > 50 ? '#ef4444' : '#10b981'};">-${drawdown.toFixed(1)}%</strong></div>
+                        <div>💧 Market Cap ${fmtUSD(coin.market_cap)} · Vol. 24h ${fmtUSD(coin.total_volume)}</div>
+                        <div style="color:#9ca3af;margin-top:4px;">* Rango estimado con los percentiles 5% y 95% del historial de 90 días.</div>
+                    </div>
+                </div>`;
+        } catch (e) {
+            xray.innerHTML = `<div style="color:#ef4444;font-size:12px;">⚠️ ${esc(e.message)}</div>`;
+        }
+    }
+
+    document.getElementById('p6-scan-alpha').onclick = () => scanAlpha100x(false);
+    document.getElementById('p6-alpha-refresh').onclick = () => scanAlpha100x(true);
+    document.getElementById('p6-alpha-tbody').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-p6-alpha90]');
+        if (btn) analyzeAlpha90d(btn.getAttribute('data-p6-alpha90'));
+    });
+
+    // --- Watchlist (persistente) ---
+    function readWatchlist() {
+        try { return JSON.parse(localStorage.getItem(WL_KEY) || '[]'); } catch (e) { return []; }
+    }
+    function writeWatchlist(list) {
+        try { localStorage.setItem(WL_KEY, JSON.stringify(list)); } catch (e) {}
+    }
+
+    function renderWatchlist() {
+        const tbody = document.getElementById('p6-wl-tbody');
+        const list = readWatchlist();
+        if (!list.length) {
+            tbody.innerHTML = '<tr><td colspan="5" style="padding:12px;color:#9ca3af;">Watchlist vacía. Añade tu primera moneda en vigilancia.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = list.map((w) => `
+            <tr style="border-bottom:1px solid #1f2937;">
+                <td style="padding:8px;font-weight:bold;color:#fff;">${esc(w.ticker)}</td>
+                <td style="padding:8px;color:#d1d5db;">${esc(w.days)}</td>
+                <td style="padding:8px;color:#facc15;">${esc(w.ceiling)}</td>
+                <td style="padding:8px;color:#9ca3af;">${esc(w.notes)}</td>
+                <td style="padding:8px;"><button data-p6-wl-del="${esc(w.id)}" style="background:#1f2937;color:#ef4444;border:none;padding:4px 9px;border-radius:5px;cursor:pointer;font-size:11px;">✕</button></td>
+            </tr>`).join('');
+    }
+
+    function addWatchlist() {
+        const ticker = document.getElementById('p6-wl-ticker').value.trim().toUpperCase();
+        if (!ticker) {
+            document.getElementById('p6-wl-status').innerHTML = '<span style="color:#ef4444;">Escribe al menos un ticker.</span>';
+            return;
+        }
+        const item = {
+            id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            ticker,
+            days: document.getElementById('p6-wl-days').value.trim(),
+            ceiling: document.getElementById('p6-wl-ceiling').value.trim(),
+            notes: document.getElementById('p6-wl-notes').value.trim()
+        };
+        const list = readWatchlist();
+        list.unshift(item);
+        writeWatchlist(list);
+        ['p6-wl-ticker', 'p6-wl-days', 'p6-wl-ceiling', 'p6-wl-notes'].forEach((id) => { document.getElementById(id).value = ''; });
+        document.getElementById('p6-wl-status').innerHTML = `<span style="color:#10b981;">${esc(ticker)} añadida a la watchlist.</span>`;
+        renderWatchlist();
+    }
+
+    renderWatchlist();
+    document.getElementById('p6-wl-add').onclick = addWatchlist;
+    document.getElementById('p6-wl-tbody').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-p6-wl-del]');
+        if (!btn) return;
+        const list = readWatchlist().filter((w) => w.id !== btn.getAttribute('data-p6-wl-del'));
+        writeWatchlist(list);
+        renderWatchlist();
+    });
+
+    // ------------------------------------------------------------------------
+    // PESTAÑA 4 · PATRONES DE MANIPULACIÓN DE MARKET MAKERS (SVG)
+    // ------------------------------------------------------------------------
+    function mmSvg(path, labels) {
+        return `<svg viewBox="0 0 300 170" preserveAspectRatio="none" style="width:100%;height:170px;display:block;background:#090d16;border-radius:8px;">
+            <rect width="300" height="170" fill="#090d16"/>
+            <path d="${path}" fill="none" stroke="#f43f5e" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+            ${labels.map((l) => `<text x="${l.x}" y="${l.y}" fill="#fff" font-size="10" font-family="sans-serif" font-weight="bold">${l.text}</text>`).join('')}
+        </svg>`;
+    }
+
+    function renderMmCards() {
+        const grid = document.getElementById('p6-mm-grid');
+        const cards = [
+            {
+                name: 'DWF LABS',
+                path: 'M15,120 L70,120 L82,108 L95,122 L130,72 L150,66 L180,30 L180,150',
+                labels: [{ x: 120, y: 20, text: 'FLASH DUMP' }, { x: 20, y: 140, text: 'Consolidación' }],
+                rule: 'No perseguir velas verdes; asegurar ganancias agresivas en resistencias y usar Trailing Stop ajustado.'
+            },
+            {
+                name: 'WINTERMUTE',
+                path: 'M15,130 L60,110 L75,40 L85,115 L115,95 L135,30 L150,100 L175,80 L205,55 L205,150',
+                labels: [{ x: 78, y: 32, text: 'LIQ LONG' }, { x: 138, y: 22, text: 'LIQ LONG' }, { x: 130, y: 68, text: 'FLASH DUMP' }],
+                rule: 'Evitar apalancamiento alto; colocar órdenes límite justo en las mechas de liquidación de Longs.'
+            },
+            {
+                name: 'JUMP TRADING',
+                path: 'M15,150 L30,30 L55,60 L70,45 L85,70 L95,55 L110,80 L135,75 L160,95 L185,90 L215,130 L235,150',
+                labels: [{ x: 40, y: 24, text: 'Impulso' }, { x: 120, y: 50, text: 'Distribución' }, { x: 170, y: 120, text: 'SLOW DUMP' }],
+                rule: 'Observar la pérdida de estructura en la distribución superior para salir o buscar cortos tras la ruptura.'
+            }
+        ];
+
+        grid.innerHTML = cards.map((c) => `
+            <div style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:12px;">
+                <div style="color:#f43f5e;font-weight:bold;font-size:13px;margin-bottom:8px;">${esc(c.name)}</div>
+                ${mmSvg(c.path, c.labels)}
+                <div style="font-size:11px;color:#d1d5db;margin-top:8px;line-height:1.5;">🎯 <strong style="color:#fff;">Regla táctica:</strong> ${esc(c.rule)}</div>
+            </div>`).join('');
+    }
+    renderMmCards();
+
+    window.navigateToPlaybook = () => { window.location.hash = 'panel-playbook'; };
+})();
+
