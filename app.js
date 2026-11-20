@@ -67,7 +67,7 @@
   const FUTURES_SYMBOLS = ['BTC', 'ETH', 'SOL', 'SUI', 'XRP', 'BNB'];
   const BITGET_POSITION_SYMBOLS = new Set(['BTC', 'ETH', 'SOL', 'XRP']);
 
-  const API_PROVIDERS = ['fred', 'dune', 'coinalyze', 'livecoinwatch', 'coinmarketcap', 'cryptorank'];
+  const API_PROVIDERS = ['fred', 'dune', 'coinalyze', 'livecoinwatch', 'coinmarketcap', 'cryptorank', 'coingecko'];
   const SESSION_PROVIDERS = [
     'glassnode', 'cryptoquant', 'chainexposed', 'tokenterminal',
     'artemis', 'fundingview', 'dropstab', 'gmgn', 'coinglass'
@@ -84,7 +84,8 @@
     coinalyze: 'Coinalyze',
     livecoinwatch: 'LiveCoinWatch',
     coinmarketcap: 'CoinMarketCap',
-    cryptorank: 'CryptoRank'
+    cryptorank: 'CryptoRank',
+    coingecko: 'CoinGecko'
   };
 
   const SESSION_LABELS = {
@@ -585,6 +586,7 @@
   }
 
   async function requestJSON(url, options = {}) {
+    url = applyCoingeckoKey(url);
     const timeout = Number(options.timeout) > 0 ? Number(options.timeout) : 12000;
     const retries = Number.isInteger(options.retries) ? options.retries : 1;
     const method = options.method || 'GET';
@@ -693,6 +695,23 @@
       maxEntries: QUANT_CACHE_MAX_ENTRIES
     })
   };
+
+  // CoinGecko demo key (opcional). Si el usuario la guarda en Conexiones > API Keys,
+  // se añade a todas las llamadas a api.coingecko.com para esquivar el rate limit
+  // y el bloqueo CORS en hosts estaticos. La key vive solo en localStorage.
+  function coingeckoDemoKey() {
+    return (state.apiKeys && state.apiKeys.coingecko) || '';
+  }
+  window.QuantCoingeckoKey = coingeckoDemoKey;
+
+  function applyCoingeckoKey(url) {
+    const target = String(url || '');
+    if (!target.includes('api.coingecko.com')) return target;
+    const key = coingeckoDemoKey();
+    if (!key) return target;
+    const sep = target.includes('?') ? '&' : '?';
+    return `${target}${sep}x_cg_demo_api_key=${encodeURIComponent(key)}`;
+  }
 
   function proxyUrl(url) {
     const proxy = state.proxy || DEFAULT_PROXY;
@@ -988,6 +1007,12 @@
       case 'cryptorank':
         await fetchProtected(
           `https://api.cryptorank.io/v1/currencies?api_key=${encodeURIComponent(key)}&limit=1`,
+          { timeout: 10000 }
+        );
+        break;
+      case 'coingecko':
+        await fetchProtected(
+          `https://api.coingecko.com/api/v3/ping?x_cg_demo_api_key=${encodeURIComponent(key)}`,
           { timeout: 10000 }
         );
         break;
@@ -6921,6 +6946,7 @@
     livecoinwatch: 'LiveCoinWatch',
     coinmarketcap: 'CoinMarketCap',
     cryptorank: 'CryptoRank',
+    coingecko: 'CoinGecko',
     glassnode: 'Glassnode Studio',
     cryptoquant: 'CryptoQuant',
     chainexposed: 'ChainExposed',
@@ -13852,6 +13878,13 @@
 
     // Fetch con fallback (proxy local -> directo -> AllOrigins) y deteccion de 429.
     async function alphaFetchJson(url, timeoutMs = 25000) {
+        if (typeof window.QuantCoingeckoKey === 'function' && String(url).includes('api.coingecko.com')) {
+            const key = window.QuantCoingeckoKey();
+            if (key) {
+                const sep = String(url).includes('?') ? '&' : '?';
+                url = url + sep + 'x_cg_demo_api_key=' + encodeURIComponent(key);
+            }
+        }
         const attempts = [];
         const local = typeof window.QuantLocalProxy === 'function' ? window.QuantLocalProxy(url) : null;
         if (local) attempts.push(local);
