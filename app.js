@@ -13823,3 +13823,463 @@
 
 
 // === ZONA RESERVADA PARA EXPANSIÓN DE FUTUROS MÓDULOS (PANEL 6+) ===
+
+// ============================================================================
+// MÓDULO 13 AUTO-INYECTABLE: RADAR BINANCE ALPHA (GANADORES Y PERDEDORES)
+// + RADIOGRAFÍA HISTÓRICA EXACTA DE PRECIO, VOLUMEN Y MARKET CAP (24H/7D/30D/90D)
+// (blindado: fetch con fallback /proxy → directo → AllOrigins, escape HTML,
+//  delegación de eventos y caché 2 min.)
+// ============================================================================
+(function initBinanceAlphaRadarModule() {
+    const oldModal = document.getElementById('binance-alpha-radar-modal');
+    const oldDockBtn = document.getElementById('dock-btn-binance-alpha');
+    const oldFallbackBtn = document.getElementById('btn-open-binance-alpha-fallback');
+    if (oldModal) oldModal.remove();
+    if (oldDockBtn) oldDockBtn.remove();
+    if (oldFallbackBtn) oldFallbackBtn.remove();
+
+    let alphaCoinsCache = [];
+    let lastFetchTime = 0;
+    const coinHistoryCache = new Map(); // Caché de 90d por moneda
+    let currentFilterMode = 'GAINERS_24H';
+    let currentSearch = '';
+
+    function esc(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    // Fetch con fallback (proxy local -> directo -> AllOrigins) y deteccion de 429.
+    async function alphaFetchJson(url, timeoutMs = 25000) {
+        const attempts = [];
+        const local = typeof window.QuantLocalProxy === 'function' ? window.QuantLocalProxy(url) : null;
+        if (local) attempts.push(local);
+        attempts.push(url);
+        attempts.push('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
+
+        if (window.QuantFetch && typeof window.QuantFetch.first === 'function') {
+            try {
+                return await window.QuantFetch.first(attempts, { timeout: timeoutMs, cacheKey: 'alpha ' + url });
+            } catch (e) {
+                if (e && (e.status === 429 || /429/.test(String(e.message || '')))) {
+                    throw new Error('Límite temporal de peticiones de CoinGecko alcanzado (429). Espera 45 segundos y pulsa Actualizar.');
+                }
+                throw e;
+            }
+        }
+
+        let lastError = null;
+        let saw429 = false;
+        for (const target of attempts) {
+            const controller = new AbortController();
+            const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const response = await fetch(target, { cache: 'no-store', credentials: 'omit', signal: controller.signal });
+                if (response.status === 429) { saw429 = true; throw new Error('HTTP 429'); }
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                return await response.json();
+            } catch (error) {
+                lastError = error;
+            } finally {
+                window.clearTimeout(timer);
+            }
+        }
+        if (saw429) throw new Error('Límite temporal de peticiones de CoinGecko alcanzado (429). Espera 45 segundos y pulsa Actualizar.');
+        throw lastError || new Error('Sin respuesta de la API');
+    }
+
+    // 1. Ventana Modal del Módulo 13
+    const modal = document.createElement('div');
+    modal.id = 'binance-alpha-radar-modal';
+    modal.style.cssText = 'display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:999999;background:#0b0e14;border:2px solid #facc15;border-radius:12px;width:96%;max-width:1120px;color:#f3f4f6;font-family:sans-serif;box-shadow:0 25px 65px rgba(0,0,0,0.95);padding:20px;max-height:93vh;overflow-y:auto;';
+
+    modal.innerHTML = `
+        <!-- Cabecera -->
+        <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1f2937;padding-bottom:12px;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+            <div>
+                <h3 style="margin:0;color:#facc15;font-size:17px;">🌟 Módulo 13: Radar Binance Alpha — Ganadores, Perdedores & Radiografía 90D</h3>
+                <span style="font-size:11px;color:#9ca3af;">Categoría oficial <code>binance-alpha-spotlight</code> (CoinGecko). Haz clic en cualquier activo para ver su crecimiento real de Precio, Volumen y Market Cap en 24h, 7d, 30d y 90d.</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <button id="btn-refresh-alpha-list" style="background:#1f2937;color:#facc15;border:1px solid #facc15;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;">🔄 Actualizar Lista</button>
+                <button id="close-alpha-modal" style="background:#1f2937;color:#9ca3af;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cerrar</button>
+            </div>
+        </div>
+
+        <!-- Panel de Radiografía 24h / 7d / 30d / 90d (Se despliega al elegir una moneda) -->
+        <div id="alpha-xray-panel" style="display:none;background:#111827;border:1px solid #facc15;border-radius:10px;padding:14px;margin-bottom:14px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+                <div id="alpha-xray-title" style="font-size:15px;font-weight:bold;color:#fff;">🔬 Radiografía Histórica</div>
+                <button id="btn-close-alpha-xray" style="background:#1f2937;color:#9ca3af;border:none;padding:4px 9px;border-radius:5px;cursor:pointer;font-size:11px;">Ocultar Radiografía ▲</button>
+            </div>
+            <div id="alpha-xray-content" style="display:grid;grid-template-columns:1.35fr 1fr;gap:12px;align-items:center;"></div>
+        </div>
+
+        <!-- Barra de Filtros Rápidos y Buscador -->
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;background:#151924;padding:10px 12px;border-radius:8px;margin-bottom:10px;">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <button class="alpha-filter-btn" data-mode="GAINERS_24H" style="background:#10b981;color:#000;border:none;padding:6px 11px;border-radius:5px;font-size:11px;font-weight:bold;cursor:pointer;">🚀 Top Ganadores 24h</button>
+                <button class="alpha-filter-btn" data-mode="LOSERS_24H" style="background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:6px 11px;border-radius:5px;font-size:11px;font-weight:bold;cursor:pointer;">🩸 Top Perdedores 24h</button>
+                <button class="alpha-filter-btn" data-mode="GAINERS_7D" style="background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:6px 11px;border-radius:5px;font-size:11px;font-weight:bold;cursor:pointer;">🔥 Top 7 Días</button>
+                <button class="alpha-filter-btn" data-mode="GAINERS_30D" style="background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:6px 11px;border-radius:5px;font-size:11px;font-weight:bold;cursor:pointer;">💎 Top 30 Días</button>
+                <button class="alpha-filter-btn" data-mode="VOL_DESC" style="background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:6px 11px;border-radius:5px;font-size:11px;font-weight:bold;cursor:pointer;">📊 Mayor Volumen</button>
+                <button class="alpha-filter-btn" data-mode="MCAP_DESC" style="background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:6px 11px;border-radius:5px;font-size:11px;font-weight:bold;cursor:pointer;">🏛️ Mayor Market Cap</button>
+            </div>
+            <input id="alpha-search-input" type="text" placeholder="Buscar token Alpha..." style="background:#0b0e14;border:1px solid #374151;color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;width:180px;" />
+        </div>
+
+        <div id="alpha-status-bar" style="font-size:11px;color:#9ca3af;margin-bottom:8px;">Listo para consultar el ecosistema Binance Alpha.</div>
+
+        <!-- Tabla Principal -->
+        <div style="overflow-x:auto;border:1px solid #1f2937;border-radius:8px;max-height:460px;overflow-y:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left;">
+                <thead style="position:sticky;top:0;background:#151924;color:#9ca3af;border-bottom:1px solid #1f2937;z-index:2;">
+                    <tr>
+                        <th style="padding:10px;"># / Activo Alpha</th>
+                        <th style="padding:10px;">Precio USD</th>
+                        <th style="padding:10px;">24h %</th>
+                        <th style="padding:10px;">7d %</th>
+                        <th style="padding:10px;">30d %</th>
+                        <th style="padding:10px;">Volumen 24h</th>
+                        <th style="padding:10px;">Market Cap (24h%)</th>
+                        <th style="padding:10px;">Vol/MCap</th>
+                        <th style="padding:10px;">Análisis 90D</th>
+                    </tr>
+                </thead>
+                <tbody id="alpha-table-tbody"></tbody>
+            </table>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    // 2. Utilidades de Formato
+    function fmtUSD(num) {
+        if (num === null || num === undefined || isNaN(num)) return '-';
+        if (num >= 1e9) return '$' + (num / 1e9).toFixed(2) + 'B';
+        if (num >= 1e6) return '$' + (num / 1e6).toFixed(2) + 'M';
+        if (num >= 1e3) return '$' + (num / 1e3).toFixed(1) + 'K';
+        return '$' + num.toFixed(2);
+    }
+
+    function fmtPrice(p) {
+        if (p === null || p === undefined || isNaN(p)) return '-';
+        if (p < 0.0001) return '$' + p.toFixed(7);
+        if (p < 0.01) return '$' + p.toFixed(5);
+        if (p < 1) return '$' + p.toFixed(4);
+        return '$' + p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function fmtPctBadge(val) {
+        if (val === null || val === undefined || isNaN(val)) return '<span style="color:#6b7280;">N/A</span>';
+        const color = val >= 0 ? '#10b981' : '#ef4444';
+        const sign = val >= 0 ? '+' : '';
+        return `<strong style="color:${color};">${sign}${val.toFixed(2)}%</strong>`;
+    }
+
+    // 3. Descargar Lista de Monedas Binance Alpha (CoinGecko)
+    async function loadBinanceAlphaList(forceRefresh = false) {
+        const statusEl = document.getElementById('alpha-status-bar');
+        const tbody = document.getElementById('alpha-table-tbody');
+        const now = Date.now();
+
+        if (!forceRefresh && alphaCoinsCache.length > 0 && (now - lastFetchTime) < 120000) {
+            renderAlphaTable();
+            return;
+        }
+
+        statusEl.innerHTML = '⏳ Descargando ranking actualizado de monedas <strong>Binance Alpha</strong> desde CoinGecko...';
+        tbody.innerHTML = `<tr><td colspan="9" style="padding:20px;text-align:center;color:#9ca3af;">Cargando mercado Binance Alpha (24h, 7d, 30d)...</td></tr>`;
+
+        try {
+            const url = 'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&category=binance-alpha-spotlight&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h,7d,30d';
+            const data = await alphaFetchJson(url);
+            if (!Array.isArray(data) || data.length === 0) {
+                throw new Error('CoinGecko devolvió una lista vacía para la categoría.');
+            }
+
+            alphaCoinsCache = data;
+            lastFetchTime = now;
+            statusEl.innerHTML = `✅ <strong>${data.length} activos de Binance Alpha</strong> cargados (${new Date().toLocaleTimeString()}). Selecciona <strong>🔬 Ver 90d</strong> en cualquier fila para calcular cambios de Volumen y Market Cap a 7d, 30d y 90d.`;
+            renderAlphaTable();
+        } catch (err) {
+            statusEl.innerHTML = `<span style="color:#ef4444;">⚠️ ${esc(err.message)}</span>`;
+            tbody.innerHTML = `<tr><td colspan="9" style="padding:18px;text-align:center;color:#fca5a5;">${esc(err.message)}</td></tr>`;
+        }
+    }
+
+    // 4. Renderizar Tabla Filtrada y Ordenada
+    function renderAlphaTable() {
+        const tbody = document.getElementById('alpha-table-tbody');
+        let list = [...alphaCoinsCache];
+
+        if (currentSearch) {
+            const q = currentSearch.toLowerCase();
+            list = list.filter(c => c.name.toLowerCase().includes(q) || c.symbol.toLowerCase().includes(q));
+        }
+
+        const getVal = (v, fallback) => (v === null || v === undefined || isNaN(v)) ? fallback : v;
+        if (currentFilterMode === 'GAINERS_24H') {
+            list.sort((a, b) => getVal(b.price_change_percentage_24h_in_currency, -9999) - getVal(a.price_change_percentage_24h_in_currency, -9999));
+        } else if (currentFilterMode === 'LOSERS_24H') {
+            list.sort((a, b) => getVal(a.price_change_percentage_24h_in_currency, 9999) - getVal(b.price_change_percentage_24h_in_currency, 9999));
+        } else if (currentFilterMode === 'GAINERS_7D') {
+            list.sort((a, b) => getVal(b.price_change_percentage_7d_in_currency, -9999) - getVal(a.price_change_percentage_7d_in_currency, -9999));
+        } else if (currentFilterMode === 'GAINERS_30D') {
+            list.sort((a, b) => getVal(b.price_change_percentage_30d_in_currency, -9999) - getVal(a.price_change_percentage_30d_in_currency, -9999));
+        } else if (currentFilterMode === 'VOL_DESC') {
+            list.sort((a, b) => getVal(b.total_volume, 0) - getVal(a.total_volume, 0));
+        } else if (currentFilterMode === 'MCAP_DESC') {
+            list.sort((a, b) => getVal(b.market_cap, 0) - getVal(a.market_cap, 0));
+        }
+
+        if (list.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="9" style="padding:18px;text-align:center;color:#9ca3af;">No hay monedas que coincidan con la búsqueda.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = list.map((c, idx) => {
+            const volMcapRatio = (c.market_cap > 0 && c.total_volume > 0) ? ((c.total_volume / c.market_cap) * 100).toFixed(1) + '%' : '-';
+            const highActivity = c.market_cap > 0 && (c.total_volume / c.market_cap) >= 0.35;
+
+            return `
+                <tr style="border-bottom:1px solid #1f2937;background:${idx < 3 && currentFilterMode.startsWith('GAINERS') ? 'rgba(6,78,59,0.22)' : (idx < 3 && currentFilterMode === 'LOSERS_24H' ? 'rgba(127,29,29,0.22)' : '#0b0e14')};">
+                    <td style="padding:9px;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span style="color:#6b7280;font-size:10px;width:18px;">${idx + 1}</span>
+                            <img src="${esc(c.image)}" alt="" style="width:20px;height:20px;border-radius:50%;" />
+                            <div>
+                                <strong style="color:#fff;font-size:12px;">${esc(c.symbol.toUpperCase())}</strong>
+                                <div style="font-size:10px;color:#9ca3af;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(c.name)}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td style="padding:9px;font-weight:bold;color:#fff;">${fmtPrice(c.current_price)}</td>
+                    <td style="padding:9px;">${fmtPctBadge(c.price_change_percentage_24h_in_currency)}</td>
+                    <td style="padding:9px;">${fmtPctBadge(c.price_change_percentage_7d_in_currency)}</td>
+                    <td style="padding:9px;">${fmtPctBadge(c.price_change_percentage_30d_in_currency)}</td>
+                    <td style="padding:9px;color:#60a5fa;font-weight:bold;">${fmtUSD(c.total_volume)}</td>
+                    <td style="padding:9px;">
+                        <div style="color:#d1d5db;">${fmtUSD(c.market_cap)}</div>
+                        <div style="font-size:10px;">${fmtPctBadge(c.market_cap_change_percentage_24h)}</div>
+                    </td>
+                    <td style="padding:9px;color:${highActivity ? '#facc15' : '#9ca3af'};font-weight:${highActivity ? 'bold' : 'normal'};">
+                        ${volMcapRatio} ${highActivity ? '🔥' : ''}
+                    </td>
+                    <td style="padding:9px;">
+                        <button data-alpha-xray="${esc(c.id)}" style="background:#facc15;color:#000;border:none;padding:5px 10px;border-radius:5px;cursor:pointer;font-size:11px;font-weight:bold;">
+                            🔬 Ver 90d
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    // 5. Cálculo Exacto de Variación por Timestamp (24h, 7d, 30d y 90d)
+    function findClosestValueAtDaysAgo(series, daysAgo) {
+        if (!Array.isArray(series) || series.length < 2) return null;
+        const latestTs = series[series.length - 1][0];
+        const targetTs = latestTs - (daysAgo * 86400 * 1000);
+        const oldestTs = series[0][0];
+        if (targetTs < oldestTs - (2 * 86400 * 1000)) return null;
+
+        let closest = series[0];
+        let minDiff = Math.abs(series[0][0] - targetTs);
+        for (let i = 1; i < series.length; i++) {
+            const diff = Math.abs(series[i][0] - targetTs);
+            if (diff < minDiff) {
+                minDiff = diff;
+                closest = series[i];
+            }
+        }
+        return closest[1];
+    }
+
+    function calcSeriesGrowthPct(series, daysAgo) {
+        if (!Array.isArray(series) || series.length < 2) return null;
+        const currentVal = series[series.length - 1][1];
+        const pastVal = findClosestValueAtDaysAgo(series, daysAgo);
+        if (pastVal === null || pastVal <= 0 || currentVal === null) return null;
+        return ((currentVal - pastVal) / pastVal) * 100;
+    }
+
+    // 6. Radiografía Profunda de Precio, Volumen y Market Cap (24h, 7d, 30d, 90d)
+    window.inspectBinanceAlphaCoin90d = async function(coinId) {
+        const coin = alphaCoinsCache.find(c => c.id === coinId);
+        if (!coin) return;
+
+        const panel = document.getElementById('alpha-xray-panel');
+        const titleEl = document.getElementById('alpha-xray-title');
+        const contentEl = document.getElementById('alpha-xray-content');
+
+        panel.style.display = 'block';
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        titleEl.innerHTML = `🔬 Radiografía 24h / 7d / 30d / 90d: <span style="color:#facc15;">${esc(coin.name)} (${esc(coin.symbol.toUpperCase())})</span>`;
+        contentEl.innerHTML = `<div style="grid-column:span 2;color:#9ca3af;font-size:12px;padding:10px;">⏳ Descargando historial de 90 días (Precio, Volumen y Market Cap) desde CoinGecko...</div>`;
+
+        try {
+            let histData = coinHistoryCache.get(coinId);
+            if (!histData) {
+                const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=90`;
+                histData = await alphaFetchJson(url, 30000);
+                coinHistoryCache.set(coinId, histData);
+            }
+
+            const prices = histData.prices || [];
+            const mcaps = histData.market_caps || [];
+            const vols = histData.total_volumes || [];
+
+            const metrics = [
+                {
+                    label: '💵 Precio USD',
+                    now: fmtPrice(coin.current_price),
+                    d1: coin.price_change_percentage_24h_in_currency ?? calcSeriesGrowthPct(prices, 1),
+                    d7: coin.price_change_percentage_7d_in_currency ?? calcSeriesGrowthPct(prices, 7),
+                    d30: coin.price_change_percentage_30d_in_currency ?? calcSeriesGrowthPct(prices, 30),
+                    d90: calcSeriesGrowthPct(prices, 90)
+                },
+                {
+                    label: '📊 Volumen Total',
+                    now: fmtUSD(coin.total_volume),
+                    d1: calcSeriesGrowthPct(vols, 1),
+                    d7: calcSeriesGrowthPct(vols, 7),
+                    d30: calcSeriesGrowthPct(vols, 30),
+                    d90: calcSeriesGrowthPct(vols, 90)
+                },
+                {
+                    label: '🏛️ Market Cap',
+                    now: fmtUSD(coin.market_cap),
+                    d1: coin.market_cap_change_percentage_24h ?? calcSeriesGrowthPct(mcaps, 1),
+                    d7: calcSeriesGrowthPct(mcaps, 7),
+                    d30: calcSeriesGrowthPct(mcaps, 30),
+                    d90: calcSeriesGrowthPct(mcaps, 90)
+                }
+            ];
+
+            contentEl.innerHTML = `
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left;background:#0b0e14;border:1px solid #1f2937;border-radius:6px;">
+                        <thead>
+                            <tr style="background:#151924;color:#9ca3af;border-bottom:1px solid #1f2937;">
+                                <th style="padding:8px;">Métrica</th>
+                                <th style="padding:8px;">Actual</th>
+                                <th style="padding:8px;">24 Horas</th>
+                                <th style="padding:8px;">7 Días</th>
+                                <th style="padding:8px;">30 Días</th>
+                                <th style="padding:8px;">90 Días</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${metrics.map(m => `
+                                <tr style="border-bottom:1px solid #1f2937;">
+                                    <td style="padding:8px;font-weight:bold;color:#fff;">${m.label}</td>
+                                    <td style="padding:8px;color:#60a5fa;font-weight:bold;">${m.now}</td>
+                                    <td style="padding:8px;">${fmtPctBadge(m.d1)}</td>
+                                    <td style="padding:8px;">${fmtPctBadge(m.d7)}</td>
+                                    <td style="padding:8px;">${fmtPctBadge(m.d30)}</td>
+                                    <td style="padding:8px;">${fmtPctBadge(m.d90)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    <div style="font-size:10px;color:#9ca3af;margin-top:6px;">
+                        * Si aparece <strong>N/A</strong> en 30d o 90d significa que el token Alpha se listó recientemente y aún no cumple esa antigüedad en el mercado.
+                    </div>
+                </div>
+                <div style="background:#090d16;border:1px solid #1f2937;border-radius:8px;padding:8px;">
+                    <div style="font-size:10px;color:#facc15;margin-bottom:4px;font-weight:bold;">Curva de Precio Histórica (Hasta 90 Días)</div>
+                    <canvas id="alpha-xray-canvas" width="380" height="120" style="width:100%;height:120px;display:block;"></canvas>
+                </div>
+            `;
+
+            drawAlphaMiniChart(prices);
+        } catch (err) {
+            contentEl.innerHTML = `<div style="grid-column:span 2;color:#fca5a5;font-size:12px;">⚠️ ${esc(err.message)}</div>`;
+        }
+    };
+
+    function drawAlphaMiniChart(prices) {
+        const canvas = document.getElementById('alpha-xray-canvas');
+        if (!canvas || prices.length < 2) return;
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width, H = canvas.height;
+        ctx.clearRect(0, 0, W, H);
+
+        const vals = prices.map(p => p[1]);
+        const minV = Math.min(...vals);
+        const maxV = Math.max(...vals);
+        const range = (maxV - minV) || 1;
+        const isUp = vals[vals.length - 1] >= vals[0];
+        const color = isUp ? '#10b981' : '#ef4444';
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        vals.forEach((v, i) => {
+            const x = (i / (vals.length - 1)) * (W - 10) + 5;
+            const y = H - 10 - (((v - minV) / range) * (H - 20));
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+    }
+
+    // 7. Eventos de Filtros, Busqueda, Cierre y Radiografía (delegados)
+    document.querySelectorAll('.alpha-filter-btn').forEach(btn => {
+        btn.onclick = () => {
+            currentFilterMode = btn.getAttribute('data-mode');
+            document.querySelectorAll('.alpha-filter-btn').forEach(b => {
+                b.style.background = '#1f2937'; b.style.color = '#d1d5db'; b.style.border = '1px solid #374151';
+            });
+            btn.style.background = currentFilterMode === 'LOSERS_24H' ? '#ef4444' : '#facc15';
+            btn.style.color = currentFilterMode === 'LOSERS_24H' ? '#fff' : '#000';
+            btn.style.border = 'none';
+            renderAlphaTable();
+        };
+    });
+
+    document.getElementById('alpha-search-input').addEventListener('input', (e) => {
+        currentSearch = e.target.value.trim();
+        renderAlphaTable();
+    });
+
+    document.getElementById('alpha-table-tbody').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-alpha-xray]');
+        if (btn) window.inspectBinanceAlphaCoin90d(btn.getAttribute('data-alpha-xray'));
+    });
+
+    document.getElementById('btn-refresh-alpha-list').onclick = () => loadBinanceAlphaList(true);
+    document.getElementById('close-alpha-modal').onclick = () => { modal.style.display = 'none'; };
+    document.getElementById('btn-close-alpha-xray').onclick = () => {
+        document.getElementById('alpha-xray-panel').style.display = 'none';
+    };
+
+    function openAlphaModal() {
+        const isHidden = modal.style.display === 'none';
+        modal.style.display = isHidden ? 'block' : 'none';
+        if (isHidden) loadBinanceAlphaList(false);
+    }
+
+    window.openBinanceAlphaRadar = openAlphaModal;
+
+    // 8. Inyectar Botón directamente en el Dock Maestro Unificado (o botón flotante si no existe)
+    setTimeout(() => {
+        const dock = document.getElementById('master-unified-bottom-dock');
+        if (dock) {
+            const btn = document.createElement('button');
+            btn.id = 'dock-btn-binance-alpha';
+            btn.style.cssText = 'background:linear-gradient(135deg,#eab308,#ca8a04);color:#000;border:none;padding:6px 11px;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;';
+            btn.innerHTML = '🌟 Binance Alpha';
+            btn.onclick = openAlphaModal;
+            dock.appendChild(btn);
+        } else {
+            const fbBtn = document.createElement('button');
+            fbBtn.id = 'btn-open-binance-alpha-fallback';
+            fbBtn.style.cssText = 'position:fixed;bottom:65px;left:15px;z-index:999998;background:#eab308;color:#000;font-weight:bold;border:1px solid #fef08a;padding:9px 14px;border-radius:8px;font-size:12px;cursor:pointer;';
+            fbBtn.innerHTML = '🌟 Binance Alpha';
+            fbBtn.onclick = openAlphaModal;
+            document.body.appendChild(fbBtn);
+        }
+    }, 1000);
+})();
+
