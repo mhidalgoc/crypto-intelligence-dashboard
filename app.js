@@ -16576,3 +16576,478 @@
         getStats: () => JSON.parse(JSON.stringify(state.stats))
     };
 })();
+
+// ============================================================================
+// PANEL 7 AUTO-INYECTABLE: RECORDATORIOS, PIRÁMIDE DE RIESGO Y REGLAS DE ORO
+// Se abre desde el dock maestro (#master-unified-bottom-dock) o botón flotante.
+// No modifica módulos previos: solo añade modal, overlay, estilos y trigger.
+// ============================================================================
+(function initPanel7GoldenRulesModule() {
+    // Idempotencia: limpia inyecciones previas si el script se evalúa dos veces.
+    ['panel7-golden-rules-modal', 'panel7-golden-rules-overlay', 'dock-btn-panel7', 'btn-open-panel7-fallback'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+    });
+
+    const NOTES_KEY = 'crypto_panel7_golden_notes_v1';
+
+    const PHRASES = [
+        'La disciplina paga más que cualquier indicador: si el setup no aparece, no fuerzas la entrada.',
+        'Nunca persigas una vela verde enorme. El precio siempre retrocede; tu trabajo es esperar la zona.',
+        'El stop loss no es una pérdida: es el precio de seguir en el juego. Respétalo sin negociar.',
+        'Mantén liquidez en USDT/USDC. Las mejores oportunidades llegan cuando los demás están atrapados.',
+        'Revisa BTC primero. Si el rey rompe soporte, ninguna alt está a salvo.',
+        'Solo arriesga lo que puedes perder sin cambiar tus decisiones. El tamaño de posición correcto te mantiene frío.',
+        'Si llevas dos trades seguidos perdiendo, cierra la pantalla. El mercado sigue ahí mañana.',
+        'No promedies a la baja sin una tesis escrita y un nivel de invalidación claro.',
+        'Una entrada buena es aburrida: esperas, ejecutas y dejas que el plan haga el trabajo.',
+        'La codicia convierte un trade ganador en uno perdedor. Toma parciales y sube el stop.'
+    ];
+
+    const PYRAMID = {
+        high: {
+            label: '10–15% · ALTO RIESGO',
+            short: 'Alpha / Test Pumps',
+            width: '62%',
+            color: '#ef4444',
+            assets: ['Binance Alpha (nuevos listados)', 'Test Pumps ya retraídos', 'Micro caps < $50M'],
+            rule: 'Máximo 10–15% del capital total. Solo con liquidez > $1M/día, Test Pump confirmado y stop definido ANTES de entrar. Si el activo no tiene 90 días de historial, opera con la mitad de esta asignación.'
+        },
+        growth: {
+            label: '35–40% · CRECIMIENTO',
+            short: 'SOL · SUI · XRP · BNB · ETH',
+            width: '81%',
+            color: '#f59e0b',
+            assets: ['SOL', 'SUI', 'XRP', 'BNB', 'ETH'],
+            rule: 'Núcleo de crecimiento. Compra en retrocesos 61.8–78.6% con BTC estable, nunca en verticales. Máximo 3 activos abiertos a la vez y revisión semanal de tesis.'
+        },
+        base: {
+            label: '40–50% · BASE Y LIQUIDEZ',
+            short: 'USDT/USDC + BTC',
+            width: '100%',
+            color: '#10b981',
+            assets: ['USDT / USDC (liquidez)', 'BTC (ancla del mercado)', 'Reserva para caídas'],
+            rule: 'Es tu escudo. Mantén al menos 40% líquido para comprar pánico y usa BTC como termómetro del mercado. Esta capa no se toca para perseguir altcoins.'
+        }
+    };
+
+    const TREE = [
+        {
+            level: 'NIVEL 1',
+            title: 'Macro y BTC',
+            body: 'BTC sobre la EMA 50 diaria, dominancia estable y macro sin pánico. Si BTC rompe soporte, todo lo demás espera.'
+        },
+        {
+            level: 'NIVEL 2',
+            title: 'Estructura 1D / 4H',
+            body: 'Tendencia intacta: máximos y mínimos crecientes en el timeframe mayor. Opera a favor de 1D, afina en 4H.'
+        },
+        {
+            level: 'NIVEL 3',
+            title: 'Liquidez, OB, EMA 20/50 y Fib 0.618',
+            body: 'Entra donde está el dinero: order block, barrido de liquidez, precio en EMA 20/50 o en el Golden Pocket 0.618.'
+        },
+        {
+            level: 'NIVEL 4',
+            title: 'Ejecución 40/35/25 + SL por ATR',
+            body: 'Tres entradas escalonadas (40% / 35% / 25%) y stop a 1.5–2 ATR del nivel de invalidación. Riesgo total ≤ 2% del capital.'
+        }
+    ];
+
+    const NOTE_TYPES = {
+        ENTRADA: { color: '#10b981', bg: 'rgba(16,185,129,0.10)', label: 'ENTRADA' },
+        SALIDA: { color: '#ef4444', bg: 'rgba(239,68,68,0.10)', label: 'SALIDA' },
+        PSICOLOGIA: { color: '#a855f7', bg: 'rgba(168,85,247,0.12)', label: 'PSICOLOGÍA' }
+    };
+
+    function esc(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    // ------------------------------------------------------------------------
+    // Estilos propios (no toca styles.css)
+    // ------------------------------------------------------------------------
+    const style = document.createElement('style');
+    style.id = 'panel7-golden-rules-style';
+    style.textContent = `
+        #panel7-golden-rules-modal { scrollbar-width: thin; }
+        #panel7-golden-rules-modal::-webkit-scrollbar { width: 8px; }
+        #panel7-golden-rules-modal::-webkit-scrollbar-thumb { background: #374151; border-radius: 99px; }
+        .p7-pyramid-btn {
+            display: block;
+            margin: 0 auto;
+            padding: 9px 24px;
+            border: 1px solid #374151;
+            border-radius: 6px;
+            background: #151924;
+            color: #d1d5db;
+            cursor: pointer;
+            text-align: center;
+            transition: filter .15s ease, border-color .15s ease, transform .15s ease;
+            clip-path: polygon(7% 0, 93% 0, 100% 100%, 0 100%);
+        }
+        .p7-pyramid-btn:hover { filter: brightness(1.18); }
+        .p7-pyramid-btn.is-active { transform: scale(1.015); }
+        .p7-note-del:hover { color: #fff !important; background: #ef4444 !important; }
+        .p7-rule-li { margin-bottom: 4px; }
+        #p7-reminder-text { transition: opacity .18s ease; }
+    `;
+
+    // ------------------------------------------------------------------------
+    // Overlay + modal
+    // ------------------------------------------------------------------------
+    const overlay = document.createElement('div');
+    overlay.id = 'panel7-golden-rules-overlay';
+    overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:999998;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);';
+
+    const modal = document.createElement('div');
+    modal.id = 'panel7-golden-rules-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-labelledby', 'p7-title');
+    modal.style.cssText = 'display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:999999;background:#0b0e14;border:2px solid #f59e0b;border-radius:12px;width:96%;max-width:1180px;color:#f3f4f6;font-family:sans-serif;box-shadow:0 25px 65px rgba(0,0,0,0.95);padding:18px;max-height:92vh;overflow-y:auto;';
+
+    modal.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:1px solid #1f2937;padding-bottom:12px;margin-bottom:14px;flex-wrap:wrap;">
+            <div>
+                <h3 id="p7-title" style="margin:0;color:#f59e0b;font-size:17px;">🧠 Panel 7 · Recordatorios, Pirámide de Riesgo y Reglas de Oro</h3>
+                <span style="font-size:11px;color:#9ca3af;">Disciplina operativa: asignación por capas, validación jerárquica y notas de ejecución.</span>
+            </div>
+            <button id="p7-close" type="button" style="background:#1f2937;color:#9ca3af;border:none;padding:7px 12px;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cerrar</button>
+        </div>
+
+        <div style="background:linear-gradient(90deg,#151924,#111827);border:1px solid #f59e0b;border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:240px;">
+                <div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#f59e0b;font-weight:bold;">⚡ Recordatorio clave</div>
+                <div id="p7-reminder-text" style="font-size:14px;color:#fff;margin-top:4px;line-height:1.45;">Cargando recordatorio…</div>
+            </div>
+            <button id="p7-next-rule" type="button" style="background:#1f2937;color:#f59e0b;border:1px solid #f59e0b;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;white-space:nowrap;">Siguiente regla ↻</button>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:14px;align-items:start;">
+            <!-- COLUMNA IZQUIERDA · ESTRUCTURAS FIJAS -->
+            <div>
+                <div style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:12px;margin-bottom:14px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                        <div style="font-size:13px;font-weight:bold;color:#f59e0b;">🔺 Pirámide de asignación y riesgo</div>
+                        <div style="font-size:10px;color:#6b7280;">Haz clic en un piso para ver su regla</div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+                        ${Object.keys(PYRAMID).map((key) => {
+                            const floor = PYRAMID[key];
+                            return `<button type="button" class="p7-pyramid-btn" data-p7-floor="${key}" style="width:${floor.width};border-color:${floor.color};box-shadow:inset 0 0 18px ${floor.color}22;">
+                                <div style="font-size:10px;color:${floor.color};font-weight:bold;letter-spacing:.03em;">${esc(floor.label)}</div>
+                                <div style="font-size:11px;color:#d1d5db;margin-top:2px;">${esc(floor.short)}</div>
+                            </button>`;
+                        }).join('')}
+                    </div>
+                    <div id="p7-pyramid-detail" style="background:#0b0e14;border:1px solid #1f2937;border-radius:8px;padding:10px;margin-top:12px;"></div>
+                </div>
+
+                <div style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:12px;">
+                    <div style="font-size:13px;font-weight:bold;color:#f59e0b;margin-bottom:10px;">🧭 Árbol jerárquico de validación</div>
+                    ${TREE.map((node, index) => `
+                        <div style="background:#0b0e14;border:1px solid #374151;border-left:3px solid #f59e0b;border-radius:7px;padding:9px 10px;">
+                            <div style="font-size:9px;color:#f59e0b;font-weight:bold;letter-spacing:.08em;">${esc(node.level)}</div>
+                            <div style="font-size:12px;color:#fff;font-weight:bold;margin:2px 0;">${esc(node.title)}</div>
+                            <div style="font-size:10.5px;color:#9ca3af;line-height:1.5;">${esc(node.body)}</div>
+                        </div>
+                        ${index < TREE.length - 1 ? '<div style="text-align:center;color:#f59e0b;font-size:13px;line-height:1;margin:3px 0;">▼</div>' : ''}
+                    `).join('')}
+                </div>
+            </div>
+
+            <!-- COLUMNA DERECHA · DINÁMICO -->
+            <div>
+                <div style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:12px;margin-bottom:14px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+                        <div style="font-size:13px;font-weight:bold;color:#f59e0b;">🗒️ Muro de notas adhesivas</div>
+                        <div id="p7-notes-count" style="font-size:10px;color:#6b7280;">0 notas</div>
+                    </div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+                        <select id="p7-note-type" aria-label="Tipo de nota" style="background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px;border-radius:6px;font-size:11px;cursor:pointer;">
+                            <option value="ENTRADA">ENTRADA</option>
+                            <option value="SALIDA">SALIDA</option>
+                            <option value="PSICOLOGIA">PSICOLOGÍA</option>
+                        </select>
+                        <input id="p7-note-text" type="text" maxlength="180" placeholder="Escribe una nota de ejecución…" style="flex:1;min-width:150px;background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px 9px;border-radius:6px;font-size:11px;" />
+                        <button id="p7-add-note" type="button" style="background:#3b82f6;color:#fff;border:none;padding:7px 12px;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">➕ Añadir</button>
+                    </div>
+                    <div id="p7-notes-status" style="font-size:10px;color:#6b7280;min-height:14px;margin-bottom:6px;">Se guardan en este navegador.</div>
+                    <div id="p7-notes-list" style="max-height:270px;overflow-y:auto;padding-right:2px;"></div>
+                </div>
+
+                <div style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:12px;">
+                    <div style="font-size:13px;font-weight:bold;color:#f59e0b;margin-bottom:10px;">🚦 Semáforo de disciplina</div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;">
+                        <div style="background:rgba(16,185,129,0.08);border:1px solid #10b981;border-radius:8px;padding:10px;">
+                            <div style="font-size:11.5px;font-weight:bold;color:#10b981;">✅ LUZ VERDE (Ejecutar)</div>
+                            <ul style="margin:8px 0 0 15px;padding:0;font-size:10.5px;color:#d1d5db;line-height:1.55;">
+                                <li class="p7-rule-li">BTC sobre EMA 50 diaria y macro sin pánico.</li>
+                                <li class="p7-rule-li">Precio en zona de valor (61.8–78.6%) con liquidez real.</li>
+                                <li class="p7-rule-li">SL por ATR definido y riesgo ≤ 2% del capital.</li>
+                            </ul>
+                        </div>
+                        <div style="background:rgba(239,68,68,0.08);border:1px solid #ef4444;border-radius:8px;padding:10px;">
+                            <div style="font-size:11.5px;font-weight:bold;color:#ef4444;">🛑 LUZ ROJA (Prohibido Operar)</div>
+                            <ul style="margin:8px 0 0 15px;padding:0;font-size:10.5px;color:#d1d5db;line-height:1.55;">
+                                <li class="p7-rule-li">BTC rompiendo soporte o pánico macro en curso.</li>
+                                <li class="p7-rule-li">Vela verde +30% ya extendida: no perseguir.</li>
+                                <li class="p7-rule-li">Sin stop loss o apalancamiento mayor a 3x.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top:14px;border-top:1px solid #1f2937;padding-top:10px;font-size:10px;color:#6b7280;line-height:1.5;">
+            🧠 Regla maestra: <strong style="color:#d1d5db;">primero se protege el capital, después se busca el crecimiento</strong>. Si el árbol de validación no está completo, la respuesta es no operar.
+        </div>
+    `;
+
+    document.head.appendChild(style);
+    document.body.appendChild(overlay);
+    document.body.appendChild(modal);
+
+    // ------------------------------------------------------------------------
+    // Recordatorio rotativo
+    // ------------------------------------------------------------------------
+    let phraseIndex = Math.floor(Math.random() * PHRASES.length);
+
+    function showPhrase(next) {
+        const el = document.getElementById('p7-reminder-text');
+        if (!el) return;
+        if (next && PHRASES.length > 1) {
+            let candidate = phraseIndex;
+            while (candidate === phraseIndex) candidate = Math.floor(Math.random() * PHRASES.length);
+            phraseIndex = candidate;
+        }
+        el.style.opacity = '0';
+        window.setTimeout(() => {
+            el.textContent = PHRASES[phraseIndex];
+            el.style.opacity = '1';
+        }, 130);
+    }
+
+    // ------------------------------------------------------------------------
+    // Pirámide interactiva
+    // ------------------------------------------------------------------------
+    let activeFloor = 'base';
+
+    function renderFloor(key) {
+        const floor = PYRAMID[key] || PYRAMID.base;
+        activeFloor = PYRAMID[key] ? key : 'base';
+        const detail = document.getElementById('p7-pyramid-detail');
+        if (detail) {
+            detail.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <div style="font-size:12px;font-weight:bold;color:${floor.color};">${esc(floor.label)}</div>
+                    <div style="font-size:10px;color:#9ca3af;">${esc(floor.short)}</div>
+                </div>
+                <div style="display:flex;gap:5px;flex-wrap:wrap;margin:8px 0;">
+                    ${floor.assets.map((a) => `<span style="font-size:10px;background:#151924;border:1px solid #374151;border-radius:5px;padding:2px 7px;color:#e5e7eb;">${esc(a)}</span>`).join('')}
+                </div>
+                <div style="font-size:10.5px;color:#d1d5db;line-height:1.55;border-top:1px solid #1f2937;padding-top:7px;">
+                    <strong style="color:${floor.color};">Regla estricta:</strong> ${esc(floor.rule)}
+                </div>`;
+        }
+        document.querySelectorAll('[data-p7-floor]').forEach((btn) => {
+            const isActive = btn.getAttribute('data-p7-floor') === activeFloor;
+            btn.classList.toggle('is-active', isActive);
+            btn.style.background = isActive ? '#1f2937' : '#151924';
+            btn.style.opacity = isActive ? '1' : '0.82';
+        });
+    }
+
+    // ------------------------------------------------------------------------
+    // Muro de notas (localStorage)
+    // ------------------------------------------------------------------------
+    function readNotes() {
+        try {
+            const raw = localStorage.getItem(NOTES_KEY);
+            if (raw === null) return null;
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function writeNotes(notes) {
+        try { localStorage.setItem(NOTES_KEY, JSON.stringify(notes)); } catch (error) { /* almacenamiento no disponible */ }
+    }
+
+    function seedNotes() {
+        const seed = [
+            { id: 'seed-entrada', type: 'ENTRADA', text: 'Comprar SOL solo en retroceso 61.8% con BTC estable sobre la EMA 50.' },
+            { id: 'seed-salida', type: 'SALIDA', text: 'Vender 30% en el techo del rango y subir el SL a break-even.' },
+            { id: 'seed-psicologia', type: 'PSICOLOGIA', text: 'Si pierdo dos trades seguidos, cierro la pantalla una hora.' }
+        ];
+        writeNotes(seed);
+        return seed;
+    }
+
+    function getNotes() {
+        const stored = readNotes();
+        if (stored) return stored;
+        return seedNotes();
+    }
+
+    function renderNotes() {
+        const list = document.getElementById('p7-notes-list');
+        const count = document.getElementById('p7-notes-count');
+        if (!list) return;
+        const notes = getNotes();
+        if (count) count.textContent = `${notes.length} nota${notes.length === 1 ? '' : 's'}`;
+        if (!notes.length) {
+            list.innerHTML = '<div style="font-size:10.5px;color:#6b7280;padding:12px 0;text-align:center;">Sin notas. Añade tu primera regla de ejecución.</div>';
+            return;
+        }
+        list.innerHTML = notes.map((note) => {
+            const meta = NOTE_TYPES[note.type] || NOTE_TYPES.PSICOLOGIA;
+            return `<div style="display:flex;gap:8px;align-items:flex-start;background:${meta.bg};border-left:3px solid ${meta.color};border-radius:6px;padding:8px;margin-bottom:6px;">
+                <div style="flex:1;min-width:0;">
+                    <span style="font-size:8px;font-weight:bold;color:${meta.color};letter-spacing:.07em;">${meta.label}</span>
+                    <div style="font-size:11px;color:#e5e7eb;line-height:1.45;margin-top:2px;word-break:break-word;">${esc(note.text)}</div>
+                </div>
+                <button type="button" class="p7-note-del" data-p7-del="${esc(note.id)}" title="Borrar nota" aria-label="Borrar nota" style="background:#151924;color:#9ca3af;border:1px solid #374151;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;flex:0 0 auto;">✕</button>
+            </div>`;
+        }).join('');
+    }
+
+    function addNote() {
+        const input = document.getElementById('p7-note-text');
+        const typeEl = document.getElementById('p7-note-type');
+        const status = document.getElementById('p7-notes-status');
+        const text = (input.value || '').trim();
+        if (!text) {
+            status.textContent = 'Escribe una nota antes de guardar.';
+            status.style.color = '#ef4444';
+            input.focus();
+            return;
+        }
+        const notes = getNotes();
+        notes.unshift({
+            id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            type: NOTE_TYPES[typeEl.value] ? typeEl.value : 'PSICOLOGIA',
+            text
+        });
+        writeNotes(notes);
+        input.value = '';
+        status.textContent = 'Nota guardada.';
+        status.style.color = '#10b981';
+        renderNotes();
+    }
+
+    // ------------------------------------------------------------------------
+    // Abrir / cerrar
+    // ------------------------------------------------------------------------
+    function openPanel7() {
+        overlay.style.display = 'block';
+        modal.style.display = 'block';
+        modal.scrollTop = 0;
+        renderFloor(activeFloor);
+        renderNotes();
+        const status = document.getElementById('p7-notes-status');
+        if (status) {
+            status.textContent = 'Se guardan en este navegador.';
+            status.style.color = '#6b7280';
+        }
+        showPhrase(false);
+    }
+
+    function closePanel7() {
+        modal.style.display = 'none';
+        overlay.style.display = 'none';
+    }
+
+    document.getElementById('p7-close').addEventListener('click', closePanel7);
+    overlay.addEventListener('click', closePanel7);
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && modal.style.display === 'block') closePanel7();
+    });
+
+    document.getElementById('p7-next-rule').addEventListener('click', () => showPhrase(true));
+
+    document.querySelectorAll('[data-p7-floor]').forEach((btn) => {
+        btn.addEventListener('click', () => renderFloor(btn.getAttribute('data-p7-floor')));
+    });
+
+    document.getElementById('p7-add-note').addEventListener('click', addNote);
+    document.getElementById('p7-note-text').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            addNote();
+        }
+    });
+    document.getElementById('p7-notes-list').addEventListener('click', (event) => {
+        const btn = event.target.closest('[data-p7-del]');
+        if (!btn) return;
+        const id = btn.getAttribute('data-p7-del');
+        const notes = getNotes().filter((note) => note.id !== id);
+        writeNotes(notes);
+        renderNotes();
+    });
+
+    renderFloor('base');
+    renderNotes();
+
+    // ------------------------------------------------------------------------
+    // Trigger en el dock maestro (con respaldo flotante)
+    // ------------------------------------------------------------------------
+    function openPanel7FromTrigger(event) {
+        if (event) event.preventDefault();
+        openPanel7();
+    }
+
+    let floatingButton = null;
+    function createFloatingButton() {
+        if (document.getElementById('btn-open-panel7-fallback')) return;
+        floatingButton = document.createElement('button');
+        floatingButton.id = 'btn-open-panel7-fallback';
+        floatingButton.type = 'button';
+        floatingButton.style.cssText = 'position:fixed;right:16px;bottom:72px;z-index:999998;background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;border:1px solid #fcd34d;padding:9px 14px;border-radius:8px;font-size:12px;font-weight:bold;cursor:pointer;box-shadow:0 10px 24px rgba(0,0,0,0.55);';
+        floatingButton.innerHTML = '🧠 Reglas de Oro (P7)';
+        floatingButton.addEventListener('click', openPanel7FromTrigger);
+        document.body.appendChild(floatingButton);
+    }
+
+    function injectDockButton() {
+        if (document.getElementById('dock-btn-panel7')) return true;
+        const dock = document.getElementById('master-unified-bottom-dock');
+        if (!dock) return false;
+        const btn = document.createElement('button');
+        btn.id = 'dock-btn-panel7';
+        btn.type = 'button';
+        btn.className = 'dock-btn is-amber';
+        btn.title = 'Recordatorios, pirámide de riesgo y reglas de oro';
+        btn.innerHTML = '<span class="dock-icon">🧠</span><span class="dock-label">Reglas de Oro (P7)</span>';
+        btn.addEventListener('click', openPanel7FromTrigger);
+        dock.appendChild(btn);
+        return true;
+    }
+
+    window.openPanel7GoldenRules = openPanel7;
+
+    if (!injectDockButton()) {
+        let attempts = 0;
+        const watcher = window.setInterval(() => {
+            attempts += 1;
+            if (injectDockButton()) {
+                window.clearInterval(watcher);
+                if (floatingButton) {
+                    floatingButton.remove();
+                    floatingButton = null;
+                }
+                return;
+            }
+            if (attempts >= 25) {
+                window.clearInterval(watcher);
+                if (!document.getElementById('dock-btn-panel7')) createFloatingButton();
+            }
+        }, 400);
+    }
+})();
