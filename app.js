@@ -14388,6 +14388,15 @@
         return (val >= 0 ? '+' : '') + Number(val).toFixed(digits) + '%';
     }
 
+    function fmtCoinPrice(val) {
+        const num = Number(val);
+        if (!Number.isFinite(num)) return '-';
+        if (num < 0.0001) return '$' + num.toFixed(7);
+        if (num < 0.01) return '$' + num.toFixed(5);
+        if (num < 1) return '$' + num.toFixed(4);
+        return '$' + num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
     // ------------------------------------------------------------------------
     // SECCIÓN DEL PANEL
     // ------------------------------------------------------------------------
@@ -14459,6 +14468,15 @@
                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
                     <button id="p6-scan-alpha" style="background:#facc15;color:#000;border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">🔍 Escanear Binance Alpha (Ready 100X)</button>
                     <button id="p6-alpha-refresh" style="background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">🔄 Refrescar</button>
+                </div>
+                <div style="background:#151924;border:1px solid #facc15;border-radius:8px;padding:10px 12px;margin-bottom:10px;">
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <span style="font-size:12px;color:#facc15;font-weight:bold;">🔎 Analizar cualquier cripto:</span>
+                        <input id="p6-custom-asset" type="text" placeholder="BTC, ETH, PEPE, ARB..." style="background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px 10px;border-radius:6px;font-size:12px;width:170px;" />
+                        <button id="p6-analyze-custom" type="button" style="background:#facc15;color:#000;border:none;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">Analizar</button>
+                        <span id="p6-custom-status" style="font-size:11px;color:#9ca3af;">Escribe un ticker o nombre y pulsa Analizar (o Enter).</span>
+                    </div>
+                    <div id="p6-custom-result" style="display:none;margin-top:10px;"></div>
                 </div>
                 <div id="p6-alpha-status" style="font-size:11px;color:#9ca3af;margin-bottom:8px;">Pulsa "Escanear" para puntuar cada activo de Binance Alpha según su probabilidad de explotar (0–100%).</div>
                 <div id="p6-alpha-xray" style="display:none;margin-bottom:10px;"></div>
@@ -14941,7 +14959,7 @@
             met: parts.testPump === 25 ? 'yes' : (parts.testPump === 10 ? 'partial' : 'no'),
             why: tpMax == null
                 ? 'Sin curva de 7d suficiente para detectar el test pump.'
-                : `Pico ${fmtUSD(tpMax)} (${fmtPct(((tpMax / tpMedian) - 1) * 100)} vs mediana) y ${tpLast < tpMax ? 'ya retrajo al rango' : 'aún no retrae'}.`
+                : `Pico ${fmtCoinPrice(tpMax)} (${fmtPct(((tpMax / tpMedian) - 1) * 100)} vs mediana) y ${tpLast < tpMax ? 'ya retrajo al rango' : 'aún no retrae'}.`
         });
 
         // 4) Liquidez (0-25)
@@ -14953,7 +14971,7 @@
         checks.push({
             key: 'liquidez', label: 'Liquidez', pts: parts.liquidez, max: 25,
             met: parts.liquidez >= 20 ? 'yes' : (parts.liquidez >= 10 ? 'partial' : 'no'),
-            why: `Market Cap ${fmtUSD(mcap)} + Vol. 24h ${fmtUSD(vol)}.`
+            why: `${mcap > 0 ? `Market Cap ${fmtUSD(mcap)}` : 'Market Cap no disponible'} + Vol. 24h ${fmtUSD(vol)}.`
         });
 
         const score = parts.acumulacion + parts.noExplotada + parts.testPump + parts.liquidez;
@@ -15108,6 +15126,271 @@
             xray.innerHTML = `<div style="color:#ef4444;font-size:12px;">⚠️ ${esc(e.message)}</div>`;
         }
     }
+
+    // ------------------------------------------------------------------------
+    // ANÁLISIS DE CUALQUIER CRIPTO CON EL MISMO MOTOR DE READINESS 100X
+    // ------------------------------------------------------------------------
+    function customPrice(p) {
+        return fmtCoinPrice(p);
+    }
+
+    function custom90Svg(prices, lo, hi, max, current, testPump) {
+        const W = 620, H = 180, pad = 8;
+        const vals = prices.map((p) => Number(p[1])).filter(Number.isFinite);
+        if (vals.length < 2) return '';
+        const step = Math.max(1, Math.floor(vals.length / 160));
+        const down = [];
+        for (let i = 0; i < vals.length; i += step) down.push(vals[i]);
+        if (down[down.length - 1] !== vals[vals.length - 1]) down.push(vals[vals.length - 1]);
+        const min = Math.min(...down), maxV = Math.max(...down);
+        const range = (maxV - min) || 1;
+        const y = (v) => pad + (1 - (v - min) / range) * (H - pad * 2);
+        const pts = down.map((v, i) => `${(pad + (i / (down.length - 1)) * (W - pad * 2)).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+        const yLo = y(Math.max(lo, min));
+        const yHi = y(Math.min(hi, maxV));
+        const bandTop = Math.min(yLo, yHi);
+        const bandH = Math.abs(yHi - yLo);
+        const yCur = y(current);
+        return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:180px;background:#090d16;border-radius:8px;">
+            <rect x="${pad}" y="${bandTop}" width="${W - pad * 2}" height="${Math.max(bandH, 1)}" fill="#3b82f6" opacity="0.12"/>
+            <line x1="${pad}" y1="${yLo}" x2="${W - pad}" y2="${yLo}" stroke="#3b82f6" stroke-dasharray="4 3" stroke-width="1"/>
+            <line x1="${pad}" y1="${yHi}" x2="${W - pad}" y2="${yHi}" stroke="#3b82f6" stroke-dasharray="4 3" stroke-width="1"/>
+            <polyline points="${pts}" fill="none" stroke="#f43f5e" stroke-width="1.8"/>
+            <line x1="${pad}" y1="${yCur}" x2="${W - pad}" y2="${yCur}" stroke="#10b981" stroke-width="1" stroke-dasharray="3 3"/>
+            ${testPump ? `<text x="${W / 2}" y="14" fill="#f43f5e" font-size="11" font-weight="bold" text-anchor="middle">TEST PUMP ${customPrice(max)}</text>` : ''}
+            <text x="${pad}" y="${H - 3}" fill="#9ca3af" font-size="9">rango ${customPrice(lo)}–${customPrice(hi)} · actual ${customPrice(current)}</text>
+        </svg>`;
+    }
+
+    async function loadCustom90d(coin) {
+        const el = document.getElementById('p6-custom-90d');
+        if (!el) return;
+        el.innerHTML = '<div style="font-size:10px;color:#9ca3af;">⏳ Cargando gráfico de 90 días...</div>';
+        try {
+            let vals = [];
+            const isBinance = Boolean(coin.binanceSymbol);
+            if (!isBinance) {
+                const cgId = coin.coingeckoId || coin.id;
+                const hist = await pfFetch(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(cgId)}/market_chart?vs_currency=usd&days=90`, 30000);
+                vals = (hist && Array.isArray(hist.prices) ? hist.prices : []).map((p) => Number(p[1])).filter(Number.isFinite);
+            } else {
+                const rows = await pfFetch(`https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(coin.binanceSymbol)}&interval=1d&limit=90`, 25000);
+                vals = (Array.isArray(rows) ? rows : []).map((k) => Number(k[4])).filter(Number.isFinite);
+            }
+            if (vals.length < 10) throw new Error('Historial de 90 días insuficiente');
+            const sorted = [...vals].sort((a, b) => a - b);
+            const lo = sorted[Math.floor(sorted.length * 0.05)];
+            const hi = sorted[Math.floor(sorted.length * 0.95)];
+            const max = Math.max(...vals);
+            const current = vals[vals.length - 1];
+            const testPump = max > hi * 1.15 && current < max;
+            const drawdown = ((max - current) / max) * 100;
+            const prices = vals.map((v, i) => [i, v]);
+            el.innerHTML = `
+                <div style="font-size:10px;color:#9ca3af;margin:4px 0;">📈 Últimos 90 días · rango de acumulación (5%–95%) y Test Pump</div>
+                ${custom90Svg(prices, lo, hi, max, current, testPump)}
+                <div style="font-size:10px;color:#d1d5db;margin-top:4px;">Rango ${customPrice(lo)} – ${customPrice(hi)} · Drawdown ${drawdown.toFixed(1)}% · ${testPump ? 'Test Pump detectado' : 'Sin Test Pump claro'}</div>`;
+        } catch (e) {
+            el.innerHTML = `<div style="font-size:10px;color:#ef4444;">⚠️ No se pudo cargar el gráfico: ${esc(e.message)}</div>`;
+        }
+    }
+
+    function renderCustomAnalysis(coin, r, source) {
+        const box = document.getElementById('p6-custom-result');
+        const color = scoreColor(r.score);
+        const level = r.score >= 75 ? 'ALTA' : (r.score >= 55 ? 'MEDIA' : 'BAJA');
+        const sym = String(coin.symbol || '').toUpperCase();
+        const pct24 = Number(coin.price_change_percentage_24h_in_currency);
+        const pct7 = Number(coin.price_change_percentage_7d_in_currency);
+        const pct30 = Number(coin.price_change_percentage_30d_in_currency);
+        const volMcap = (Number(coin.market_cap) > 0 && Number(coin.total_volume) > 0)
+            ? ((Number(coin.total_volume) / Number(coin.market_cap)) * 100).toFixed(1) + '%'
+            : 'N/D';
+        const passed = r.checks.filter((ch) => ch.met === 'yes').length;
+        const partial = r.checks.filter((ch) => ch.met === 'partial').length;
+        const failed = r.checks.filter((ch) => ch.met === 'no').length;
+        const chip = (label, val, colorChip) => `<span style="display:inline-block;font-size:10px;background:#0b0e14;border:1px solid #1f2937;border-radius:5px;padding:2px 7px;margin:2px;"><span style="color:#6b7280;">${esc(label)}</span> <strong style="color:${colorChip || '#e5e7eb'};">${val}</strong></span>`;
+
+        box.style.display = 'block';
+        box.innerHTML = `
+            <div style="background:#111827;border:1px solid #facc15;border-radius:8px;padding:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        ${coin.image ? `<img src="${esc(coin.image)}" alt="" style="width:24px;height:24px;border-radius:50%;" />` : ''}
+                        <div>
+                            <div style="font-weight:bold;color:#fff;font-size:14px;">${esc(sym)} <span style="font-size:11px;color:#9ca3af;font-weight:normal;">${esc(coin.name || '')}</span></div>
+                            <div style="font-size:11px;color:#9ca3af;">${customPrice(Number(coin.current_price))} · fuente: ${esc(source)}</div>
+                        </div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;">Cumplimiento 100X</div>
+                        <div style="font-size:26px;font-weight:bold;color:${color};line-height:1.1;">${r.score}%</div>
+                        <div style="font-size:10px;color:${color};font-weight:bold;">Nivel ${level}</div>
+                    </div>
+                </div>
+                <div style="height:9px;background:#1f2937;border-radius:5px;overflow:hidden;margin:8px 0 10px;">
+                    <div style="height:100%;width:${r.score}%;background:${color};"></div>
+                </div>
+                <div style="margin-bottom:10px;">
+                    ${chip('24h', isFinite(pct24) ? fmtPct(pct24) : 'N/A', pct24 >= 0 ? '#10b981' : '#ef4444')}
+                    ${chip('7d', isFinite(pct7) ? fmtPct(pct7) : 'N/A', pct7 >= 0 ? '#10b981' : '#ef4444')}
+                    ${chip('30d', isFinite(pct30) ? fmtPct(pct30) : 'N/A', pct30 >= 0 ? '#10b981' : '#ef4444')}
+                    ${chip('Market Cap', Number(coin.market_cap) > 0 ? fmtUSD(Number(coin.market_cap)) : 'N/D')}
+                    ${chip('Vol. 24h', fmtUSD(Number(coin.total_volume)))}
+                    ${chip('Vol/MCap', volMcap)}
+                </div>
+                <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">🧩 Parámetros evaluados · <span style="color:#10b981;">${passed} cumplidos</span> · <span style="color:#f59e0b;">${partial} parciales</span> · <span style="color:#ef4444;">${failed} fallidos</span></div>
+                ${r.checks.map((ch) => {
+                    const pct = Math.round((ch.pts / ch.max) * 100);
+                    return `<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid #1f2937;">
+                        <span style="font-size:13px;">${MET_ICON[ch.met]}</span>
+                        <div style="flex:1;min-width:0;">
+                            <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#fff;">
+                                <span>${esc(ch.label)}</span>
+                                <span style="color:${MET_COLOR[ch.met]};font-weight:bold;white-space:nowrap;">${ch.pts}/${ch.max} · ${pct}%</span>
+                            </div>
+                            <div style="height:5px;background:#1f2937;border-radius:4px;overflow:hidden;margin:3px 0;">
+                                <div style="height:100%;width:${pct}%;background:${MET_COLOR[ch.met]};"></div>
+                            </div>
+                            <div style="font-size:10px;color:#9ca3af;">${esc(ch.why)}</div>
+                        </div>
+                    </div>`;
+                }).join('')}
+                <div id="p6-custom-90d" style="margin-top:8px;"></div>
+                <div style="font-size:9px;color:#6b7280;margin-top:6px;">Score = Acumulación (25) + No explotada (25) + Test Pump (25) + Liquidez (25). Cada bloque muestra su porcentaje de cumplimiento.</div>
+            </div>`;
+        loadCustom90d(coin);
+    }
+
+    async function resolveCoinGeckoCoin(query) {
+        const search = await pfFetch('https://api.coingecko.com/api/v3/search?query=' + encodeURIComponent(query), 20000);
+        const coins = (search && Array.isArray(search.coins)) ? search.coins : [];
+        if (!coins.length) throw new Error('CoinGecko no encontró "' + query + '"');
+        const exact = coins.filter((c) => String(c.symbol || '').toLowerCase() === query.toLowerCase());
+        const pool = (exact.length ? exact : coins).slice().sort((a, b) => (a.market_cap_rank || 1e9) - (b.market_cap_rank || 1e9));
+        const pick = pool[0];
+        const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${encodeURIComponent(pick.id)}&sparkline=true&price_change_percentage=24h,7d,30d`;
+        const data = await pfFetch(url, 25000);
+        if (!Array.isArray(data) || !data.length) throw new Error('Sin datos de mercado para ' + pick.symbol);
+        const coin = data[0];
+        coin.coingeckoId = pick.id;
+        return coin;
+    }
+
+    async function binanceFallbackCoin(query) {
+        const raw = String(query).trim().toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/USDT$/, '');
+        if (!raw) throw new Error('Escribe una cripto válida');
+        const symbol = raw + 'USDT';
+        const [ticker, klines] = await Promise.all([
+            pfFetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`, 15000),
+            pfFetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=90`, 20000)
+        ]);
+        const closes = (Array.isArray(klines) ? klines : []).map((k) => Number(k[4])).filter(Number.isFinite);
+        if (closes.length < 30) throw new Error('Binance no tiene historial suficiente para ' + symbol);
+        const back = (n) => {
+            const i = closes.length - 1 - n;
+            return i >= 0 ? ((closes[closes.length - 1] / closes[i]) - 1) * 100 : null;
+        };
+        return {
+            id: 'binance:' + symbol,
+            binanceSymbol: symbol,
+            coingeckoId: null,
+            symbol: raw.toLowerCase(),
+            name: raw + ' (Binance Spot)',
+            image: '',
+            current_price: Number(ticker.lastPrice) || closes[closes.length - 1],
+            market_cap: 0,
+            total_volume: Number(ticker.quoteVolume) || 0,
+            price_change_percentage_24h_in_currency: Number(ticker.priceChangePercent),
+            price_change_percentage_7d_in_currency: back(7),
+            price_change_percentage_30d_in_currency: back(30),
+            sparkline_in_7d: { price: closes.slice(-14) }
+        };
+    }
+
+    function withTimeout(promise, ms) {
+        return new Promise((resolve, reject) => {
+            const timer = window.setTimeout(() => reject(new Error('Tiempo de espera agotado')), ms);
+            promise.then((value) => { window.clearTimeout(timer); resolve(value); },
+                         (error) => { window.clearTimeout(timer); reject(error); });
+        });
+    }
+
+    let customRequestSeq = 0;
+
+    async function analyzeCustomAsset() {
+        const input = document.getElementById('p6-custom-asset');
+        const status = document.getElementById('p6-custom-status');
+        const box = document.getElementById('p6-custom-result');
+        const btn = document.getElementById('p6-analyze-custom');
+        const query = (input.value || '').trim();
+        if (!query) {
+            status.innerHTML = '<span style="color:#ef4444;">Escribe un ticker o nombre.</span>';
+            input.focus();
+            return;
+        }
+        if (btn.disabled) return;
+        btn.disabled = true;
+        const token = ++customRequestSeq;
+        const isCurrent = () => token === customRequestSeq;
+        status.innerHTML = `⏳ Analizando ${esc(query.toUpperCase())} con Binance y CoinGecko...`;
+        try {
+            const q = query.toLowerCase();
+            const cached = alpha100x.map((row) => row.coin).find((c) => c.sparkline_in_7d && String(c.symbol || '').toLowerCase() === q);
+            if (cached) {
+                renderCustomAnalysis(cached, computeReadiness(cached), 'lista Binance Alpha cargada');
+                status.innerHTML = `<span style="color:#10b981;">✅ ${esc(String(cached.symbol || '').toUpperCase())} analizada · lista Binance Alpha.</span>`;
+                return;
+            }
+
+            // Binance responde primero (rápido) y CoinGecko llega después con el Market Cap real.
+            const cgPromise = resolveCoinGeckoCoin(query);
+            cgPromise.catch(() => {});
+            let binanceCoin = null;
+            try { binanceCoin = await binanceFallbackCoin(query); } catch (e) { binanceCoin = null; }
+            if (!isCurrent()) return;
+
+            if (binanceCoin) {
+                renderCustomAnalysis(binanceCoin, computeReadiness(binanceCoin), 'Binance Spot · Market Cap pendiente');
+                status.innerHTML = `✅ ${esc(String(binanceCoin.symbol || '').toUpperCase())} analizada con Binance · completando Market Cap con CoinGecko...`;
+                btn.disabled = false;
+            } else {
+                status.innerHTML = `⏳ Binance no cotiza ${esc(query.toUpperCase())}USDT; consultando CoinGecko...`;
+            }
+
+            let cgCoin = null;
+            try {
+                cgCoin = await withTimeout(cgPromise, 45000);
+            } catch (cgError) {
+                cgCoin = null;
+            }
+            if (!isCurrent()) return;
+
+            if (cgCoin) {
+                renderCustomAnalysis(cgCoin, computeReadiness(cgCoin), 'CoinGecko');
+                status.innerHTML = `<span style="color:#10b981;">✅ ${esc(String(cgCoin.symbol || '').toUpperCase())} analizada · CoinGecko (Market Cap incluido).</span>`;
+            } else if (binanceCoin) {
+                status.innerHTML = `<span style="color:#f59e0b;">⚠️ ${esc(String(binanceCoin.symbol || '').toUpperCase())}: CoinGecko no respondió; score calculado solo con Binance (sin Market Cap).</span>`;
+            } else {
+                throw new Error('No se encontró el activo en Binance ni en CoinGecko');
+            }
+        } catch (error) {
+            if (!isCurrent()) return;
+            box.style.display = 'block';
+            box.innerHTML = `<div style="color:#ef4444;font-size:12px;">⚠️ ${esc(error.message)}. Prueba con el ticker exacto (ej. PEPE) o espera unos segundos si CoinGecko está limitado.</div>`;
+            status.innerHTML = '<span style="color:#ef4444;">No se pudo analizar el activo.</span>';
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    document.getElementById('p6-analyze-custom').addEventListener('click', analyzeCustomAsset);
+    document.getElementById('p6-custom-asset').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            analyzeCustomAsset();
+        }
+    });
 
     document.getElementById('p6-scan-alpha').onclick = () => scanAlpha100x(false);
     document.getElementById('p6-alpha-refresh').onclick = () => scanAlpha100x(true);
