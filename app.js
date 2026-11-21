@@ -15121,6 +15121,7 @@
                         <div>💧 Market Cap ${fmtUSD(coin.market_cap)} · Vol. 24h ${fmtUSD(coin.total_volume)}</div>
                         <div style="color:#9ca3af;margin-top:4px;">* Rango estimado con los percentiles 5% y 95% del historial de 90 días.</div>
                     </div>
+                    ${entryPlanHtml(coin, lo, hi, max, current)}
                 </div>`;
         } catch (e) {
             xray.innerHTML = `<div style="color:#ef4444;font-size:12px;">⚠️ ${esc(e.message)}</div>`;
@@ -15162,20 +15163,118 @@
         </svg>`;
     }
 
+    function entryPlanHtml(coin, lo, hi, max, current) {
+        const span = Math.max(hi - lo, 1e-12);
+        const invalidation = lo * 0.97;
+        const target1 = Math.max(hi, current * 1.03);
+        const target2 = Math.max(max, target1 * 1.02);
+        const defs = [
+            { ratio: 0.382, label: '38.2%', tag: 'Entrada temprana', weight: 15 },
+            { ratio: 0.5, label: '50.0%', tag: 'Equilibrio', weight: 20 },
+            { ratio: 0.618, label: '61.8%', tag: 'Golden Pocket · mejor R:R', weight: 30 },
+            { ratio: 0.786, label: '78.6%', tag: 'Máxima acumulación', weight: 25 },
+            { ratio: null, label: 'Soporte 90d', tag: 'Mínimo del rango · última defensa', weight: 10 }
+        ];
+        const rows = defs.map((d) => {
+            const price = d.ratio == null ? lo : hi - span * d.ratio;
+            const dist = ((price / current) - 1) * 100;
+            const buyable = price <= current * 1.005;
+            let state, color;
+            if (!buyable) { state = `Solo si recupera +${dist.toFixed(1)}%`; color = '#f59e0b'; }
+            else if (dist >= -1.5) { state = '✅ Precio en zona'; color = '#facc15'; }
+            else { state = `Comprar ${Math.abs(dist).toFixed(1)}% abajo`; color = '#60a5fa'; }
+            const risk = price - invalidation;
+            const rr = risk > 0 ? (target1 - price) / risk : null;
+            return { ...d, price, dist, state, color, rr, buyable };
+        });
+
+        let bestPrice = null;
+        let best;
+        if (current < lo) {
+            best = { color: '#ef4444', text: `⚠️ El precio está por debajo del mínimo de 90 días (${customPrice(lo)}). Estructura rota: no promedies a la baja sin una reconquista diaria de ${customPrice(lo)} con volumen. Los niveles de abajo solo son válidos si el precio recupera ese soporte.` };
+        } else {
+            const buys = rows.filter((r) => r.buyable).sort((a, b) => b.price - a.price);
+            const inZone = buys.find((r) => Math.abs(r.dist) <= 1.5);
+            if (inZone) {
+                bestPrice = inZone.price;
+                best = { color: '#facc15', text: `✅ Precio dentro del ${inZone.label} (${inZone.tag}): válido escalonar 1/3 ahora y reservar el resto para 61.8%, 78.6% y el soporte de 90d.` };
+            } else if (buys.length) {
+                const nearest = buys[0];
+                bestPrice = nearest.price;
+                best = { color: '#60a5fa', text: `🎯 Mejor entrada ahora: orden límite en ${customPrice(nearest.price)} (${nearest.label} · ${nearest.tag}), un ${Math.abs(nearest.dist).toFixed(1)}% por debajo del precio actual. El resto del capital, escalonado hacia el soporte de 90d (${customPrice(lo)}).` };
+            } else {
+                best = { color: '#10b981', text: `✅ Precio por debajo de todas las zonas Fibonacci: descuento profundo. Acumula con el 10% del soporte y espera reconquista de ${customPrice(lo)} para confirmar estructura.` };
+            }
+        }
+
+        const fmtTarget = (target) => {
+            const pct = ((target / current) - 1) * 100;
+            return `${customPrice(target)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`;
+        };
+
+        return `
+            <div style="margin-top:8px;background:#0b0e14;border:1px solid #374151;border-radius:8px;padding:10px;">
+                <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;align-items:center;">
+                    <div style="font-size:11px;color:#facc15;font-weight:bold;">🎯 Puntos de entrada mejor posicionados</div>
+                    <div style="font-size:10px;color:#9ca3af;">Fibonacci del impulso 90d: ${customPrice(lo)} → ${customPrice(hi)}</div>
+                </div>
+                <div style="font-size:10px;color:${best.color};background:${best.color}14;border:1px solid ${best.color}55;border-radius:6px;padding:6px 8px;margin:7px 0;line-height:1.45;">${best.text}</div>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:10px;text-align:left;">
+                        <thead><tr style="color:#6b7280;border-bottom:1px solid #1f2937;">
+                            <th style="padding:4px;">Zona</th><th style="padding:4px;">Precio</th><th style="padding:4px;">Desde actual</th>
+                            <th style="padding:4px;">Estado</th><th style="padding:4px;">DCA</th><th style="padding:4px;">R:R vs techo</th>
+                        </tr></thead>
+                        <tbody>${rows.map((r) => `<tr style="border-bottom:1px solid #111827;background:${r.price === bestPrice ? 'rgba(250,204,21,0.08)' : 'transparent'};">
+                            <td style="padding:4px;color:#fff;font-weight:bold;">${r.label} <span style="color:#6b7280;font-weight:normal;">${r.tag}</span></td>
+                            <td style="padding:4px;color:#e5e7eb;">${customPrice(r.price)}</td>
+                            <td style="padding:4px;color:${r.color};">${r.dist >= 0 ? '+' : ''}${r.dist.toFixed(1)}%</td>
+                            <td style="padding:4px;color:${r.color};">${r.state}</td>
+                            <td style="padding:4px;color:#facc15;">${r.weight}%</td>
+                            <td style="padding:4px;color:#9ca3af;">${r.rr && r.rr > 0 ? r.rr.toFixed(2) + 'x' : '—'}</td>
+                        </tr>`).join('')}</tbody>
+                    </table>
+                </div>
+                <div style="font-size:10px;color:#d1d5db;margin-top:6px;line-height:1.55;">
+                    <div>📌 Plan DCA: reparte el capital <strong>15% / 20% / 30% / 25% / 10%</strong> en 38.2%, 50%, 61.8%, 78.6% y soporte de 90d.</div>
+                    <div>🎯 Objetivo 1 (techo del rango): <strong>${fmtTarget(target1)}</strong> · Objetivo 2 (máximo/Test Pump): <strong>${fmtTarget(target2)}</strong>.</div>
+                    <div>🛑 Invalidación: cierre diario por debajo de <strong>${customPrice(invalidation)}</strong> (−3% del mínimo de 90d).</div>
+                </div>
+            </div>`;
+    }
+
+    function renderEntryPlan(coin, lo, hi, max, current) {
+        const el = document.getElementById('p6-custom-entries');
+        if (!el) return;
+        el.innerHTML = entryPlanHtml(coin, lo, hi, max, current);
+    }
+
     async function loadCustom90d(coin) {
         const el = document.getElementById('p6-custom-90d');
         if (!el) return;
         el.innerHTML = '<div style="font-size:10px;color:#9ca3af;">⏳ Cargando gráfico de 90 días...</div>';
         try {
             let vals = [];
+            let historySource = '';
             const isBinance = Boolean(coin.binanceSymbol);
+            const binSym = coin.binanceSymbol || (String(coin.symbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '') + 'USDT');
+            const loadBinanceHistory = async () => {
+                const rows = await pfFetch(`https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(binSym)}&interval=1d&limit=90`, 25000);
+                return (Array.isArray(rows) ? rows : []).map((k) => Number(k[4])).filter(Number.isFinite);
+            };
             if (!isBinance) {
-                const cgId = coin.coingeckoId || coin.id;
-                const hist = await pfFetch(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(cgId)}/market_chart?vs_currency=usd&days=90`, 30000);
-                vals = (hist && Array.isArray(hist.prices) ? hist.prices : []).map((p) => Number(p[1])).filter(Number.isFinite);
+                try {
+                    const cgId = coin.coingeckoId || coin.id;
+                    const hist = await pfFetch(`https://api.coingecko.com/api/v3/coins/${encodeURIComponent(cgId)}/market_chart?vs_currency=usd&days=90`, 30000);
+                    vals = (hist && Array.isArray(hist.prices) ? hist.prices : []).map((p) => Number(p[1])).filter(Number.isFinite);
+                    historySource = 'CoinGecko';
+                } catch (cgHistoryError) {
+                    vals = await loadBinanceHistory();
+                    historySource = 'Binance (CoinGecko limitado)';
+                }
             } else {
-                const rows = await pfFetch(`https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(coin.binanceSymbol)}&interval=1d&limit=90`, 25000);
-                vals = (Array.isArray(rows) ? rows : []).map((k) => Number(k[4])).filter(Number.isFinite);
+                vals = await loadBinanceHistory();
+                historySource = 'Binance';
             }
             if (vals.length < 10) throw new Error('Historial de 90 días insuficiente');
             const sorted = [...vals].sort((a, b) => a - b);
@@ -15186,12 +15285,15 @@
             const testPump = max > hi * 1.15 && current < max;
             const drawdown = ((max - current) / max) * 100;
             const prices = vals.map((v, i) => [i, v]);
+            renderEntryPlan(coin, lo, hi, max, current);
             el.innerHTML = `
-                <div style="font-size:10px;color:#9ca3af;margin:4px 0;">📈 Últimos 90 días · rango de acumulación (5%–95%) y Test Pump</div>
+                <div style="font-size:10px;color:#9ca3af;margin:4px 0;">📈 Últimos 90 días · ${esc(historySource)} · rango de acumulación (5%–95%) y Test Pump</div>
                 ${custom90Svg(prices, lo, hi, max, current, testPump)}
                 <div style="font-size:10px;color:#d1d5db;margin-top:4px;">Rango ${customPrice(lo)} – ${customPrice(hi)} · Drawdown ${drawdown.toFixed(1)}% · ${testPump ? 'Test Pump detectado' : 'Sin Test Pump claro'}</div>`;
         } catch (e) {
             el.innerHTML = `<div style="font-size:10px;color:#ef4444;">⚠️ No se pudo cargar el gráfico: ${esc(e.message)}</div>`;
+            const entries = document.getElementById('p6-custom-entries');
+            if (entries) entries.innerHTML = `<div style="font-size:10px;color:#ef4444;margin-top:6px;">⚠️ Sin historial de 90 días no se pueden calcular los puntos de entrada.</div>`;
         }
     }
 
@@ -15256,6 +15358,7 @@
                         </div>
                     </div>`;
                 }).join('')}
+                <div id="p6-custom-entries" style="margin-top:8px;"></div>
                 <div id="p6-custom-90d" style="margin-top:8px;"></div>
                 <div style="font-size:9px;color:#6b7280;margin-top:6px;">Score = Acumulación (25) + No explotada (25) + Test Pump (25) + Liquidez (25). Cada bloque muestra su porcentaje de cumplimiento.</div>
             </div>`;
