@@ -14447,6 +14447,10 @@
                     <label style="font-size:11px;color:#9ca3af;">Máximo del Impulso (High)<input id="p6-fib-high" type="number" step="any" placeholder="40000" style="width:100%;margin-top:4px;background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px;border-radius:6px;font-size:12px;" /></label>
                     <label style="font-size:11px;color:#9ca3af;">Capital Total (USD)<input id="p6-fib-capital" type="number" step="any" placeholder="10000" style="width:100%;margin-top:4px;background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px;border-radius:6px;font-size:12px;" /></label>
                 </div>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                    <button id="p6-fib-load" type="button" style="background:#3b82f6;color:#fff;border:none;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">🔄 Cargar impulso real (90d)</button>
+                    <span id="p6-fib-status" style="font-size:11px;color:#9ca3af;">Se carga automáticamente con BTC; escribe otro activo y pulsa el botón para cambiarlo.</span>
+                </div>
                 <div id="p6-fib-output" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;"></div>
             </div>
 
@@ -14531,6 +14535,7 @@
             } else {
                 window.location.hash = 'panel-playbook';
             }
+            window.setTimeout(ensurePlaybookData, 140);
         });
         return a;
     }
@@ -14542,10 +14547,30 @@
 
     if (window.lucide && typeof window.lucide.createIcons === 'function') window.lucide.createIcons();
 
+    // Si se entra directo por #panel-playbook, el router inicial pudo ejecutarse
+    // antes de inyectar este panel. Lo activamos explícitamente.
+    if (window.location.hash === '#panel-playbook') {
+        document.querySelectorAll('.view-panel').forEach((p) => p.classList.toggle('is-active', p === section));
+        document.querySelectorAll('.nav-link, .mobile-nav a').forEach((link) => {
+            const isActive = link.dataset.panelTarget === 'panel-playbook';
+            link.classList.toggle('is-active', isActive);
+            if (isActive) link.setAttribute('aria-current', 'page');
+            else link.removeAttribute('aria-current');
+        });
+        document.body.dataset.activePanel = 'playbook';
+    }
+
     // ------------------------------------------------------------------------
     // CAMBIO DE PESTAÑAS
     // ------------------------------------------------------------------------
+    let p6CurrentTab = '1';
+    let p6ShortsLoaded = false;
+    let p6ShortsLoading = false;
+    let p6FibAutoLoaded = false;
+    let p6FibLoading = false;
+
     function switchTab(tab) {
+        p6CurrentTab = tab;
         section.querySelectorAll('.p6-tab').forEach((b) => {
             const active = b.getAttribute('data-p6-tab') === tab;
             b.style.background = active ? '#3b82f6' : '#1f2937';
@@ -14555,6 +14580,8 @@
         section.querySelectorAll('.p6-pane').forEach((p) => {
             p.style.display = p.getAttribute('data-p6-pane') === tab ? 'block' : 'none';
         });
+        if (tab === '1' && !p6ShortsLoaded && !p6ShortsLoading) scanTopGainers();
+        if (tab === '2' && !p6FibAutoLoaded && !p6FibLoading) autoFibFromMarket(false);
     }
 
     section.querySelector('#p6-tabbar').addEventListener('click', (e) => {
@@ -14566,6 +14593,8 @@
     // PESTAÑA 1 · CAZADOR DE SHORTS PARABÓLICOS
     // ------------------------------------------------------------------------
     async function scanTopGainers() {
+        if (p6ShortsLoading) return;
+        p6ShortsLoading = true;
         const status = document.getElementById('p6-shorts-status');
         const tbody = document.getElementById('p6-shorts-tbody');
         status.innerHTML = '⏳ Descargando ticker/24hr de Binance Futures...';
@@ -14581,8 +14610,11 @@
                 .slice(0, 15);
             renderShortsRows(usdt);
             status.innerHTML = `✅ Top ${usdt.length} pares USDT por subida 24h. Haz clic en una fila (o escribe un ticker) para validar en profundidad.`;
+            p6ShortsLoaded = true;
         } catch (err) {
             status.innerHTML = `<span style="color:#ef4444;">⚠️ ${esc(err.message)}</span>`;
+        } finally {
+            p6ShortsLoading = false;
         }
     }
 
@@ -14767,7 +14799,66 @@
     ['p6-fib-low', 'p6-fib-high', 'p6-fib-capital'].forEach((id) => {
         document.getElementById(id).addEventListener('input', renderFib);
     });
+
+    function p6FibSymbol() {
+        return String(document.getElementById('p6-fib-asset').value || '')
+            .trim().toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/USDT$/, '') || 'BTC';
+    }
+
+    async function autoFibFromMarket(force) {
+        const lowEl = document.getElementById('p6-fib-low');
+        const highEl = document.getElementById('p6-fib-high');
+        const status = document.getElementById('p6-fib-status');
+        if (!force && lowEl.value && highEl.value) {
+            p6FibAutoLoaded = true;
+            renderFib();
+            return;
+        }
+        if (p6FibLoading) return;
+        p6FibLoading = true;
+        const symbol = p6FibSymbol();
+        if (status) status.innerHTML = `⏳ Cargando el impulso de 90 días de ${esc(symbol)}USDT desde Binance...`;
+        try {
+            const rows = await pfFetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=1d&limit=90`, 20000);
+            if (!Array.isArray(rows) || rows.length < 10) throw new Error('Sin velas suficientes para ' + symbol + 'USDT');
+            const lows = rows.map((r) => Number(r[3])).filter(Number.isFinite);
+            const highs = rows.map((r) => Number(r[2])).filter(Number.isFinite);
+            const low = Math.min(...lows);
+            const high = Math.max(...highs);
+            if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) throw new Error('Rango de impulso inválido');
+            lowEl.value = String(low);
+            highEl.value = String(high);
+            const capEl = document.getElementById('p6-fib-capital');
+            if (!capEl.value) capEl.value = '10000';
+            renderFib();
+            p6FibAutoLoaded = true;
+            if (status) status.innerHTML = `<span style="color:#10b981;">✅ ${esc(symbol)}USDT · mínimo ${fmtUSD(low)} / máximo ${fmtUSD(high)} en los últimos 90 días.</span>`;
+        } catch (error) {
+            if (status) status.innerHTML = `<span style="color:#ef4444;">⚠️ ${esc(error.message)}. Escribe Low/High manualmente.</span>`;
+        } finally {
+            p6FibLoading = false;
+        }
+    }
+
+    document.getElementById('p6-fib-load').addEventListener('click', () => autoFibFromMarket(true));
+    document.getElementById('p6-fib-asset').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            autoFibFromMarket(true);
+        }
+    });
+
     renderFib();
+
+    function ensurePlaybookData() {
+        const panel = document.getElementById('panel-playbook');
+        if (!panel || !panel.classList.contains('is-active')) return;
+        if (p6CurrentTab === '1' && !p6ShortsLoaded && !p6ShortsLoading) scanTopGainers();
+        if (p6CurrentTab === '2' && !p6FibAutoLoaded && !p6FibLoading) autoFibFromMarket(false);
+    }
+
+    window.setTimeout(ensurePlaybookData, 700);
+    window.addEventListener('hashchange', () => window.setTimeout(ensurePlaybookData, 140));
 
     // ------------------------------------------------------------------------
     // PESTAÑA 3 · RADAR BINANCE ALPHA 100X (automático + gráficos)
