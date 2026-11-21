@@ -16587,6 +16587,13 @@
 // Panel real en la barra lateral (índice 07, debajo del Playbook).
 // Recordatorios ilimitados por estilo en localStorage.
 // No modifica módulos previos: solo añade panel, nav y estilos.
+
+// ============================================================================
+// PANEL 7 AUTO-INYECTABLE: RECORDATORIOS, PIRÁMIDES Y ÁRBOLES DE VALIDACIÓN
+// Panel real en la barra lateral (índice 07, debajo del Playbook).
+// Bibliotecas ilimitadas de pirámides y árboles jerárquicos + recordatorios
+// por estilo, todo persistido en localStorage.
+// No modifica módulos previos: solo añade panel, nav y estilos.
 // ============================================================================
 (function initPanel7GoldenRulesPanel() {
     // Idempotencia: elimina versiones previas (modal antiguo y panel).
@@ -16597,40 +16604,8 @@
     document.querySelectorAll('a[data-panel-target="panel-golden-rules"]').forEach((a) => a.remove());
 
     const NOTES_KEY = 'crypto_panel7_golden_notes_v1';
-
-    const PYRAMID = {
-        high: {
-            label: '10–15% · ALTO RIESGO',
-            short: 'Alpha / Test Pumps',
-            width: '62%',
-            color: '#ef4444',
-            assets: ['Binance Alpha (nuevos listados)', 'Test Pumps ya retraídos', 'Micro caps < $50M'],
-            rule: 'Máximo 10–15% del capital total. Solo con liquidez > $1M/día, Test Pump confirmado y stop definido ANTES de entrar. Si el activo no tiene 90 días de historial, opera con la mitad de esta asignación.'
-        },
-        growth: {
-            label: '35–40% · CRECIMIENTO',
-            short: 'SOL · SUI · XRP · BNB · ETH',
-            width: '81%',
-            color: '#f59e0b',
-            assets: ['SOL', 'SUI', 'XRP', 'BNB', 'ETH'],
-            rule: 'Núcleo de crecimiento. Compra en retrocesos 61.8–78.6% con BTC estable, nunca en verticales. Máximo 3 activos abiertos a la vez y revisión semanal de tesis.'
-        },
-        base: {
-            label: '40–50% · BASE Y LIQUIDEZ',
-            short: 'USDT/USDC + BTC',
-            width: '100%',
-            color: '#10b981',
-            assets: ['USDT / USDC (liquidez)', 'BTC (ancla del mercado)', 'Reserva para caídas'],
-            rule: 'Es tu escudo. Mantén al menos 40% líquido para comprar pánico y usa BTC como termómetro del mercado. Esta capa no se toca para perseguir altcoins.'
-        }
-    };
-
-    const TREE = [
-        { level: 'NIVEL 1', title: 'Macro y BTC', body: 'BTC sobre la EMA 50 diaria, dominancia estable y macro sin pánico. Si BTC rompe soporte, todo lo demás espera.' },
-        { level: 'NIVEL 2', title: 'Estructura 1D / 4H', body: 'Tendencia intacta: máximos y mínimos crecientes en el timeframe mayor. Opera a favor de 1D, afina en 4H.' },
-        { level: 'NIVEL 3', title: 'Liquidez, OB, EMA 20/50 y Fib 0.618', body: 'Entra donde está el dinero: order block, barrido de liquidez, precio en EMA 20/50 o en el Golden Pocket 0.618.' },
-        { level: 'NIVEL 4', title: 'Ejecución 40/35/25 + SL por ATR', body: 'Tres entradas escalonadas (40% / 35% / 25%) y stop a 1.5–2 ATR del nivel de invalidación. Riesgo total ≤ 2% del capital.' }
-    ];
+    const PYRAMIDS_KEY = 'crypto_panel7_golden_pyramids_v1';
+    const TREES_KEY = 'crypto_panel7_golden_trees_v1';
 
     const NOTE_TYPES = {
         ENTRADA: { color: '#10b981', bg: 'rgba(16,185,129,0.10)', label: 'ENTRADA' },
@@ -16638,10 +16613,24 @@
         PSICOLOGIA: { color: '#a855f7', bg: 'rgba(168,85,247,0.12)', label: 'PSICOLOGÍA' }
     };
 
+    const FLOOR_COLORS = ['#ef4444', '#f59e0b', '#10b981'];
+    const FLOOR_WIDTHS = ['62%', '81%', '100%'];
+    const FLOOR_NAMES = ['Alto riesgo', 'Crecimiento', 'Base y liquidez'];
+    const INPUT_STYLE = 'width:100%;background:#0b0e14;border:1px solid #374151;color:#fff;padding:6px 8px;border-radius:5px;font-size:10.5px;margin-top:3px;';
+    const LABEL_STYLE = 'font-size:9.5px;color:#9ca3af;display:block;';
+
     function esc(value) {
         return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
         }[c]));
+    }
+
+    function clone(value) {
+        return JSON.parse(JSON.stringify(value));
+    }
+
+    function uid(prefix) {
+        return prefix + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     }
 
     // ------------------------------------------------------------------------
@@ -16661,10 +16650,20 @@
         .p7-pyramid-btn.is-active { transform: scale(1.015); }
         .p7-note-del:hover { color: #fff !important; background: #ef4444 !important; }
         .p7-filter-btn { border: 1px solid #374151; padding: 5px 9px; border-radius: 5px; font-size: 10px; font-weight: 700; cursor: pointer; }
+        .p7-card { background: #0b0e14; border: 1px solid #1f2937; border-radius: 8px; margin-bottom: 8px; }
+        .p7-card > summary { cursor: pointer; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; list-style: none; }
+        .p7-card > summary::-webkit-details-marker { display: none; }
+        .p7-card > summary:hover { background: #111827; border-radius: 8px; }
+        .p7-card[open] > summary { border-bottom: 1px solid #1f2937; border-radius: 8px 8px 0 0; }
+        .p7-mini-btn { background: #151924; color: #d1d5db; border: 1px solid #374151; border-radius: 5px; padding: 4px 9px; font-size: 10px; font-weight: 700; cursor: pointer; }
+        .p7-mini-btn:hover { filter: brightness(1.2); border-color: #60a5fa; }
+        .p7-mini-btn.is-danger { color: #ef4444; }
+        .p7-mini-btn.is-danger:hover { background: #ef4444; color: #fff; border-color: #ef4444; }
         #p7-reminder-text { transition: opacity .15s ease; }
         #p7-notes-list { scrollbar-width: thin; }
         #p7-notes-list::-webkit-scrollbar { width: 6px; }
         #p7-notes-list::-webkit-scrollbar-thumb { background: #374151; border-radius: 99px; }
+        .p7-editor { display: none; margin-top: 8px; background: #0f1420; border: 1px dashed #374151; border-radius: 7px; padding: 9px; }
     `;
     document.head.appendChild(style);
 
@@ -16682,7 +16681,7 @@
             <div class="section-heading-copy">
                 <div class="eyebrow"><span class="live-dot"></span> Panel 07 / Disciplina operativa</div>
                 <h2 id="golden-rules-title">Recordatorios y Reglas de Oro</h2>
-                <p>Pirámide de riesgo, árbol de validación y recordatorios ilimitados por estilo.</p>
+                <p>Pirámides y árboles de validación ilimitados, más recordatorios por estilo.</p>
             </div>
             <div class="heading-actions">
                 <span class="access-badge auto"><span class="access-dot"></span>Local · sin APIs</span>
@@ -16703,35 +16702,30 @@
             </div>
 
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:14px;align-items:start;">
-                <!-- COLUMNA IZQUIERDA · ESTRUCTURAS FIJAS -->
+                <!-- COLUMNA IZQUIERDA · BIBLIOTECAS -->
                 <div>
                     <div style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:12px;margin-bottom:14px;">
-                        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-                            <div style="font-size:13px;font-weight:bold;color:#f59e0b;">🔺 Pirámide de asignación y riesgo</div>
-                            <div style="font-size:10px;color:#6b7280;">Haz clic en un piso para ver su regla</div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+                            <div style="font-size:13px;font-weight:bold;color:#f59e0b;">🔺 Pirámides de asignación y riesgo</div>
+                            <div id="p7-pyramid-count" style="font-size:10px;color:#6b7280;">0 pirámides</div>
                         </div>
-                        <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
-                            ${Object.keys(PYRAMID).map((key) => {
-                                const floor = PYRAMID[key];
-                                return `<button type="button" class="p7-pyramid-btn" data-p7-floor="${key}" style="width:${floor.width};border-color:${floor.color};box-shadow:inset 0 0 18px ${floor.color}22;">
-                                    <div style="font-size:10px;color:${floor.color};font-weight:bold;letter-spacing:.03em;">${esc(floor.label)}</div>
-                                    <div style="font-size:11px;color:#d1d5db;margin-top:2px;">${esc(floor.short)}</div>
-                                </button>`;
-                            }).join('')}
+                        <div id="p7-pyramids-list"></div>
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+                            <button id="p7-pyramid-add" type="button" class="p7-mini-btn" style="color:#10b981;border-color:#10b981;">➕ Añadir pirámide</button>
+                            <span id="p7-pyramid-status" style="font-size:10px;color:#6b7280;"></span>
                         </div>
-                        <div id="p7-pyramid-detail" style="background:#0b0e14;border:1px solid #1f2937;border-radius:8px;padding:10px;margin-top:12px;"></div>
                     </div>
 
                     <div style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:12px;">
-                        <div style="font-size:13px;font-weight:bold;color:#f59e0b;margin-bottom:10px;">🧭 Árbol jerárquico de validación</div>
-                        ${TREE.map((node, index) => `
-                            <div style="background:#0b0e14;border:1px solid #374151;border-left:3px solid #f59e0b;border-radius:7px;padding:9px 10px;">
-                                <div style="font-size:9px;color:#f59e0b;font-weight:bold;letter-spacing:.08em;">${esc(node.level)}</div>
-                                <div style="font-size:12px;color:#fff;font-weight:bold;margin:2px 0;">${esc(node.title)}</div>
-                                <div style="font-size:10.5px;color:#9ca3af;line-height:1.5;">${esc(node.body)}</div>
-                            </div>
-                            ${index < TREE.length - 1 ? '<div style="text-align:center;color:#f59e0b;font-size:13px;line-height:1;margin:3px 0;">▼</div>' : ''}
-                        `).join('')}
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+                            <div style="font-size:13px;font-weight:bold;color:#f59e0b;">🧭 Árboles jerárquicos de validación</div>
+                            <div id="p7-tree-count" style="font-size:10px;color:#6b7280;">0 árboles</div>
+                        </div>
+                        <div id="p7-trees-list"></div>
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+                            <button id="p7-tree-add" type="button" class="p7-mini-btn" style="color:#10b981;border-color:#10b981;">➕ Añadir árbol</button>
+                            <span id="p7-tree-status" style="font-size:10px;color:#6b7280;"></span>
+                        </div>
                     </div>
                 </div>
 
@@ -16786,7 +16780,7 @@
             </div>
 
             <div style="margin-top:14px;border-top:1px solid #1f2937;padding-top:10px;font-size:10px;color:#6b7280;line-height:1.5;">
-                🧠 Regla maestra: <strong style="color:#d1d5db;">primero se protege el capital, después se busca el crecimiento</strong>. Si el árbol de validación no está completo, la respuesta es no operar.
+                🧠 Regla maestra: <strong style="color:#d1d5db;">primero se protege el capital, después se busca el crecimiento</strong>. Puedes crear tantas pirámides y árboles como estrategias necesites.
             </div>
         </div>
     `;
@@ -16833,7 +16827,7 @@
             if (scrim) scrim.classList.remove('is-open');
             if (window.location.hash === '#panel-golden-rules') activatePanel();
             else window.location.hash = 'panel-golden-rules';
-            window.setTimeout(() => { renderFloor(activeFloor); renderNotes(); showReminder(false, true); }, 80);
+            window.setTimeout(refreshPanelData, 80);
         });
         return a;
     }
@@ -16852,44 +16846,447 @@
     window.addEventListener('hashchange', () => {
         if (window.location.hash === '#panel-golden-rules') {
             activatePanel();
-            renderFloor(activeFloor);
-            renderNotes();
-            showReminder(false, true);
+            refreshPanelData();
         }
     });
 
     // ------------------------------------------------------------------------
-    // Pirámide interactiva
+    // Almacenamiento genérico
     // ------------------------------------------------------------------------
-    let activeFloor = 'base';
-
-    function renderFloor(key) {
-        const floor = PYRAMID[key] || PYRAMID.base;
-        activeFloor = PYRAMID[key] ? key : 'base';
-        const detail = document.getElementById('p7-pyramid-detail');
-        if (detail) {
-            detail.innerHTML = `
-                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
-                    <div style="font-size:12px;font-weight:bold;color:${floor.color};">${esc(floor.label)}</div>
-                    <div style="font-size:10px;color:#9ca3af;">${esc(floor.short)}</div>
-                </div>
-                <div style="display:flex;gap:5px;flex-wrap:wrap;margin:8px 0;">
-                    ${floor.assets.map((a) => `<span style="font-size:10px;background:#151924;border:1px solid #374151;border-radius:5px;padding:2px 7px;color:#e5e7eb;">${esc(a)}</span>`).join('')}
-                </div>
-                <div style="font-size:10.5px;color:#d1d5db;line-height:1.55;border-top:1px solid #1f2937;padding-top:7px;">
-                    <strong style="color:${floor.color};">Regla estricta:</strong> ${esc(floor.rule)}
-                </div>`;
+    function readList(key) {
+        try {
+            const raw = localStorage.getItem(key);
+            if (raw === null) return null;
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : null;
+        } catch (error) {
+            return null;
         }
-        document.querySelectorAll('[data-p7-floor]').forEach((btn) => {
-            const isActive = btn.getAttribute('data-p7-floor') === activeFloor;
+    }
+
+    function writeList(key, list) {
+        try { localStorage.setItem(key, JSON.stringify(list)); } catch (error) { /* almacenamiento no disponible */ }
+    }
+
+    function setStatus(id, text, color) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = text;
+        el.style.color = color || '#6b7280';
+    }
+
+    // ------------------------------------------------------------------------
+    // PIRÁMIDES
+    // ------------------------------------------------------------------------
+    const DEFAULT_PYRAMID = {
+        id: 'pyramid-base',
+        name: 'Pirámide base',
+        floors: [
+            {
+                percent: '10–15%', label: 'Alto riesgo',
+                assets: 'Binance Alpha, Test Pumps, Micro caps < $50M',
+                rule: 'Máximo 10–15% del capital total. Solo con liquidez > $1M/día, Test Pump confirmado y stop definido ANTES de entrar. Si el activo no tiene 90 días de historial, opera con la mitad de esta asignación.'
+            },
+            {
+                percent: '35–40%', label: 'Crecimiento',
+                assets: 'SOL, SUI, XRP, BNB, ETH',
+                rule: 'Núcleo de crecimiento. Compra en retrocesos 61.8–78.6% con BTC estable, nunca en verticales. Máximo 3 activos abiertos a la vez y revisión semanal de tesis.'
+            },
+            {
+                percent: '40–50%', label: 'Base y liquidez',
+                assets: 'USDT, USDC, BTC, Reserva para caídas',
+                rule: 'Es tu escudo. Mantén al menos 40% líquido para comprar pánico y usa BTC como termómetro del mercado. Esta capa no se toca para perseguir altcoins.'
+            }
+        ]
+    };
+
+    const DEFAULT_TREE = {
+        id: 'tree-base',
+        name: 'Árbol base',
+        levels: [
+            { title: 'Macro y BTC', body: 'BTC sobre la EMA 50 diaria, dominancia estable y macro sin pánico. Si BTC rompe soporte, todo lo demás espera.' },
+            { title: 'Estructura 1D / 4H', body: 'Tendencia intacta: máximos y mínimos crecientes en el timeframe mayor. Opera a favor de 1D, afina en 4H.' },
+            { title: 'Liquidez, OB, EMA 20/50 y Fib 0.618', body: 'Entra donde está el dinero: order block, barrido de liquidez, precio en EMA 20/50 o en el Golden Pocket 0.618.' },
+            { title: 'Ejecución 40/35/25 + SL por ATR', body: 'Tres entradas escalonadas (40% / 35% / 25%) y stop a 1.5–2 ATR del nivel de invalidación. Riesgo total ≤ 2% del capital.' }
+        ]
+    };
+
+    function getPyramids() {
+        const stored = readList(PYRAMIDS_KEY);
+        if (stored && stored.length) return stored;
+        const seed = [clone(DEFAULT_PYRAMID)];
+        writeList(PYRAMIDS_KEY, seed);
+        return seed;
+    }
+
+    function getTrees() {
+        const stored = readList(TREES_KEY);
+        if (stored && stored.length) return stored;
+        const seed = [clone(DEFAULT_TREE)];
+        writeList(TREES_KEY, seed);
+        return seed;
+    }
+
+    let pyramids = getPyramids();
+    let trees = getTrees();
+    const pyramidFloorState = new Map();
+
+    function pyramidCardHtml(p, open) {
+        return `<details class="p7-card" data-p7-py-card="${esc(p.id)}" ${open ? 'open' : ''}>
+            <summary>
+                <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                    <span style="font-size:11px;font-weight:bold;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🔺 ${esc(p.name)}</span>
+                    <span style="font-size:9px;color:#6b7280;white-space:nowrap;">${p.floors.length} pisos</span>
+                </div>
+                <div style="display:flex;gap:5px;flex:0 0 auto;">
+                    <button type="button" class="p7-mini-btn" data-p7-py-edit="${esc(p.id)}" title="Editar pirámide">✏️</button>
+                    <button type="button" class="p7-mini-btn is-danger" data-p7-py-del="${esc(p.id)}" title="Borrar pirámide">🗑️</button>
+                </div>
+            </summary>
+            <div style="padding:10px;">
+                <div data-p7-py-floors="${esc(p.id)}" style="display:flex;flex-direction:column;align-items:center;gap:6px;"></div>
+                <div data-p7-py-detail="${esc(p.id)}" style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:10px;margin-top:10px;"></div>
+                <div class="p7-editor" data-p7-py-editor="${esc(p.id)}"></div>
+            </div>
+        </details>`;
+    }
+
+    function renderPyramids(openId) {
+        const list = document.getElementById('p7-pyramids-list');
+        if (!list) return;
+        const openSet = new Set([...list.querySelectorAll('details[open]')].map((d) => d.getAttribute('data-p7-py-card')));
+        if (openId) openSet.add(openId);
+        if (!openSet.size && pyramids[0]) openSet.add(pyramids[0].id);
+        list.innerHTML = pyramids.map((p) => pyramidCardHtml(p, openSet.has(p.id))).join('');
+        pyramids.forEach((p) => {
+            renderPyramidFloors(p);
+            renderPyramidDetail(p);
+        });
+        const count = document.getElementById('p7-pyramid-count');
+        if (count) count.textContent = `${pyramids.length} pirámide${pyramids.length === 1 ? '' : 's'}`;
+    }
+
+    function renderPyramidFloors(p) {
+        const container = document.querySelector(`[data-p7-py-floors="${p.id}"]`);
+        if (!container) return;
+        container.innerHTML = p.floors.map((floor, index) => {
+            const color = FLOOR_COLORS[index] || '#3b82f6';
+            const width = FLOOR_WIDTHS[index] || '100%';
+            return `<button type="button" class="p7-pyramid-btn" data-p7-py-floor="${esc(p.id)}" data-p7-floor-index="${index}" style="width:${width};border-color:${color};box-shadow:inset 0 0 18px ${color}22;">
+                <div style="font-size:10px;color:${color};font-weight:bold;letter-spacing:.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(floor.percent)} · ${esc(String(floor.label || '').toUpperCase())}</div>
+                <div style="font-size:10.5px;color:#d1d5db;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(floor.assets || '—')}</div>
+            </button>`;
+        }).join('');
+    }
+
+    function renderPyramidDetail(p) {
+        const el = document.querySelector(`[data-p7-py-detail="${p.id}"]`);
+        if (!el) return;
+        const index = Math.min(pyramidFloorState.get(p.id) ?? p.floors.length - 1, p.floors.length - 1);
+        const floor = p.floors[Math.max(0, index)];
+        if (!floor) return;
+        const color = FLOOR_COLORS[Math.max(0, index)] || '#3b82f6';
+        const assets = String(floor.assets || '').split(',').map((a) => a.trim()).filter(Boolean);
+        el.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+                <div style="font-size:12px;font-weight:bold;color:${color};">${esc(floor.percent)} · ${esc(floor.label || FLOOR_NAMES[index] || '')}</div>
+                <div style="font-size:10px;color:#9ca3af;">${p.floors.length} pisos</div>
+            </div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap;margin:8px 0;">
+                ${assets.length
+                    ? assets.map((a) => `<span style="font-size:10px;background:#151924;border:1px solid #374151;border-radius:5px;padding:2px 7px;color:#e5e7eb;">${esc(a)}</span>`).join('')
+                    : '<span style="font-size:10px;color:#6b7280;">Sin activos definidos.</span>'}
+            </div>
+            <div style="font-size:10.5px;color:#d1d5db;line-height:1.55;border-top:1px solid #1f2937;padding-top:7px;">
+                <strong style="color:${color};">Regla estricta:</strong> ${esc(floor.rule || 'Sin regla definida.')}
+            </div>`;
+        document.querySelectorAll(`[data-p7-py-floor="${p.id}"]`).forEach((btn) => {
+            const isActive = Number(btn.getAttribute('data-p7-floor-index')) === Math.max(0, index);
             btn.classList.toggle('is-active', isActive);
             btn.style.background = isActive ? '#1f2937' : '#151924';
             btn.style.opacity = isActive ? '1' : '0.82';
         });
     }
 
+    function openPyramidEditor(p) {
+        const editor = document.querySelector(`[data-p7-py-editor="${p.id}"]`);
+        if (!editor) return;
+        editor.style.display = 'block';
+        editor.innerHTML = `
+            <div style="font-size:10px;font-weight:bold;color:#f59e0b;margin-bottom:6px;">✏️ Editando «${esc(p.name)}»</div>
+            <label style="${LABEL_STYLE}">Nombre de la pirámide
+                <input data-p7-py-field="name" value="${esc(p.name)}" style="${INPUT_STYLE}" />
+            </label>
+            ${p.floors.map((floor, index) => `
+                <div style="border:1px solid #1f2937;border-radius:6px;padding:8px;margin-top:7px;">
+                    <div style="font-size:9px;font-weight:bold;color:${FLOOR_COLORS[index] || '#3b82f6'};letter-spacing:.05em;">PISO ${index + 1} · ${esc(FLOOR_NAMES[index] || 'Piso')}</div>
+                    <div style="display:grid;grid-template-columns:96px 1fr;gap:6px;">
+                        <label style="${LABEL_STYLE}">% asignado<input data-p7-py-field="pct-${index}" value="${esc(floor.percent)}" placeholder="10–15%" style="${INPUT_STYLE}" /></label>
+                        <label style="${LABEL_STYLE}">Nombre del piso<input data-p7-py-field="label-${index}" value="${esc(floor.label)}" placeholder="${esc(FLOOR_NAMES[index] || '')}" style="${INPUT_STYLE}" /></label>
+                    </div>
+                    <label style="${LABEL_STYLE}">Activos (separados por coma)<input data-p7-py-field="assets-${index}" value="${esc(floor.assets)}" placeholder="SOL, SUI, ETH" style="${INPUT_STYLE}" /></label>
+                    <label style="${LABEL_STYLE}">Regla estricta<textarea data-p7-py-field="rule-${index}" rows="2" style="${INPUT_STYLE}">${esc(floor.rule)}</textarea></label>
+                </div>`).join('')}
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                <button type="button" class="p7-mini-btn" data-p7-py-save="${esc(p.id)}" style="background:#10b981;color:#000;border-color:#10b981;">💾 Guardar pirámide</button>
+                <button type="button" class="p7-mini-btn" data-p7-py-cancel="${esc(p.id)}">Cancelar</button>
+            </div>`;
+    }
+
+    function savePyramid(p) {
+        const editor = document.querySelector(`[data-p7-py-editor="${p.id}"]`);
+        if (!editor) return;
+        const get = (field) => {
+            const el = editor.querySelector(`[data-p7-py-field="${field}"]`);
+            return el ? el.value.trim() : '';
+        };
+        const name = get('name');
+        if (!name) {
+            setStatus('p7-pyramid-status', 'Ponle un nombre a la pirámide.', '#ef4444');
+            return;
+        }
+        const floors = p.floors.map((floor, index) => ({
+            percent: get(`pct-${index}`),
+            label: get(`label-${index}`) || floor.label,
+            assets: get(`assets-${index}`),
+            rule: get(`rule-${index}`)
+        }));
+        if (floors.some((floor) => !floor.percent || !floor.label)) {
+            setStatus('p7-pyramid-status', 'Cada piso necesita porcentaje y nombre.', '#ef4444');
+            return;
+        }
+        p.name = name;
+        p.floors = floors;
+        writeList(PYRAMIDS_KEY, pyramids);
+        setStatus('p7-pyramid-status', `«${name}» guardada.`, '#10b981');
+        renderPyramids(p.id);
+    }
+
+    function addPyramid() {
+        const base = pyramids[pyramids.length - 1] || DEFAULT_PYRAMID;
+        const copy = {
+            id: uid('pyramid'),
+            name: `Pirámide ${pyramids.length + 1}`,
+            floors: clone(base.floors)
+        };
+        pyramids.push(copy);
+        writeList(PYRAMIDS_KEY, pyramids);
+        setStatus('p7-pyramid-status', 'Nueva pirámide creada. Edítala y guarda.', '#10b981');
+        renderPyramids(copy.id);
+        openPyramidEditor(copy);
+        const editor = document.querySelector(`[data-p7-py-editor="${copy.id}"]`);
+        if (editor) editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function deletePyramid(id) {
+        if (pyramids.length <= 1) {
+            setStatus('p7-pyramid-status', 'Debe quedar al menos una pirámide.', '#ef4444');
+            return;
+        }
+        pyramids = pyramids.filter((p) => p.id !== id);
+        writeList(PYRAMIDS_KEY, pyramids);
+        pyramidFloorState.delete(id);
+        setStatus('p7-pyramid-status', 'Pirámide borrada.', '#9ca3af');
+        renderPyramids();
+    }
+
+    document.getElementById('p7-pyramids-list').addEventListener('click', (event) => {
+        const floorBtn = event.target.closest('[data-p7-py-floor]');
+        if (floorBtn) {
+            const id = floorBtn.getAttribute('data-p7-py-floor');
+            const index = Number(floorBtn.getAttribute('data-p7-floor-index'));
+            const p = pyramids.find((item) => item.id === id);
+            if (!p) return;
+            pyramidFloorState.set(id, index);
+            renderPyramidDetail(p);
+            return;
+        }
+        const editBtn = event.target.closest('[data-p7-py-edit]');
+        if (editBtn) {
+            const p = pyramids.find((item) => item.id === editBtn.getAttribute('data-p7-py-edit'));
+            if (!p) return;
+            const card = editBtn.closest('details');
+            if (card) card.open = true;
+            openPyramidEditor(p);
+            return;
+        }
+        const delBtn = event.target.closest('[data-p7-py-del]');
+        if (delBtn) {
+            deletePyramid(delBtn.getAttribute('data-p7-py-del'));
+            return;
+        }
+        const saveBtn = event.target.closest('[data-p7-py-save]');
+        if (saveBtn) {
+            const p = pyramids.find((item) => item.id === saveBtn.getAttribute('data-p7-py-save'));
+            if (p) savePyramid(p);
+            return;
+        }
+        const cancelBtn = event.target.closest('[data-p7-py-cancel]');
+        if (cancelBtn) {
+            const editor = document.querySelector(`[data-p7-py-editor="${cancelBtn.getAttribute('data-p7-py-cancel')}"]`);
+            if (editor) editor.style.display = 'none';
+        }
+    });
+
+    document.getElementById('p7-pyramid-add').addEventListener('click', addPyramid);
+
     // ------------------------------------------------------------------------
-    // Recordatorios ilimitados por estilo (localStorage)
+    // ÁRBOLES JERÁRQUICOS
+    // ------------------------------------------------------------------------
+    function treeCardHtml(t, open) {
+        return `<details class="p7-card" data-p7-tree-card="${esc(t.id)}" ${open ? 'open' : ''}>
+            <summary>
+                <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                    <span style="font-size:11px;font-weight:bold;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">🧭 ${esc(t.name)}</span>
+                    <span style="font-size:9px;color:#6b7280;white-space:nowrap;">${t.levels.length} niveles</span>
+                </div>
+                <div style="display:flex;gap:5px;flex:0 0 auto;">
+                    <button type="button" class="p7-mini-btn" data-p7-tree-edit="${esc(t.id)}" title="Editar árbol">✏️</button>
+                    <button type="button" class="p7-mini-btn is-danger" data-p7-tree-del="${esc(t.id)}" title="Borrar árbol">🗑️</button>
+                </div>
+            </summary>
+            <div style="padding:10px;">
+                <div data-p7-tree-levels="${esc(t.id)}"></div>
+                <div class="p7-editor" data-p7-tree-editor="${esc(t.id)}"></div>
+            </div>
+        </details>`;
+    }
+
+    function renderTrees(openId) {
+        const list = document.getElementById('p7-trees-list');
+        if (!list) return;
+        const openSet = new Set([...list.querySelectorAll('details[open]')].map((d) => d.getAttribute('data-p7-tree-card')));
+        if (openId) openSet.add(openId);
+        if (!openSet.size && trees[0]) openSet.add(trees[0].id);
+        list.innerHTML = trees.map((t) => treeCardHtml(t, openSet.has(t.id))).join('');
+        trees.forEach(renderTreeLevels);
+        const count = document.getElementById('p7-tree-count');
+        if (count) count.textContent = `${trees.length} árbol${trees.length === 1 ? '' : 'es'}`;
+    }
+
+    function renderTreeLevels(t) {
+        const el = document.querySelector(`[data-p7-tree-levels="${t.id}"]`);
+        if (!el) return;
+        el.innerHTML = t.levels.map((level, index) => `
+            <div style="background:#0b0e14;border:1px solid #374151;border-left:3px solid #f59e0b;border-radius:7px;padding:8px 10px;">
+                <div style="font-size:9px;color:#f59e0b;font-weight:bold;letter-spacing:.08em;display:flex;justify-content:space-between;gap:8px;">
+                    <span>NIVEL ${index + 1}</span>
+                    <span style="color:#6b7280;font-weight:normal;">${esc(t.name)}</span>
+                </div>
+                <div style="font-size:11.5px;color:#fff;font-weight:bold;margin:2px 0;">${esc(level.title || 'Sin título')}</div>
+                <div style="font-size:10px;color:#9ca3af;line-height:1.5;">${esc(level.body || 'Sin descripción.')}</div>
+            </div>
+            ${index < t.levels.length - 1 ? '<div style="text-align:center;color:#f59e0b;font-size:13px;line-height:1;margin:3px 0;">▼</div>' : ''}
+        `).join('');
+    }
+
+    function openTreeEditor(t) {
+        const editor = document.querySelector(`[data-p7-tree-editor="${t.id}"]`);
+        if (!editor) return;
+        editor.style.display = 'block';
+        editor.innerHTML = `
+            <div style="font-size:10px;font-weight:bold;color:#f59e0b;margin-bottom:6px;">✏️ Editando «${esc(t.name)}»</div>
+            <label style="${LABEL_STYLE}">Nombre del árbol
+                <input data-p7-tree-field="name" value="${esc(t.name)}" style="${INPUT_STYLE}" />
+            </label>
+            ${t.levels.map((level, index) => `
+                <div style="border:1px solid #1f2937;border-radius:6px;padding:8px;margin-top:7px;">
+                    <div style="font-size:9px;font-weight:bold;color:#f59e0b;letter-spacing:.05em;">NIVEL ${index + 1}</div>
+                    <label style="${LABEL_STYLE}">Título<input data-p7-tree-field="title-${index}" value="${esc(level.title)}" placeholder="Título del nivel" style="${INPUT_STYLE}" /></label>
+                    <label style="${LABEL_STYLE}">Descripción<textarea data-p7-tree-field="body-${index}" rows="2" style="${INPUT_STYLE}">${esc(level.body)}</textarea></label>
+                </div>`).join('')}
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                <button type="button" class="p7-mini-btn" data-p7-tree-save="${esc(t.id)}" style="background:#10b981;color:#000;border-color:#10b981;">💾 Guardar árbol</button>
+                <button type="button" class="p7-mini-btn" data-p7-tree-cancel="${esc(t.id)}">Cancelar</button>
+            </div>`;
+    }
+
+    function saveTree(t) {
+        const editor = document.querySelector(`[data-p7-tree-editor="${t.id}"]`);
+        if (!editor) return;
+        const get = (field) => {
+            const el = editor.querySelector(`[data-p7-tree-field="${field}"]`);
+            return el ? el.value.trim() : '';
+        };
+        const name = get('name');
+        if (!name) {
+            setStatus('p7-tree-status', 'Ponle un nombre al árbol.', '#ef4444');
+            return;
+        }
+        const levels = t.levels.map((level, index) => ({
+            title: get(`title-${index}`),
+            body: get(`body-${index}`)
+        }));
+        if (levels.some((level) => !level.title)) {
+            setStatus('p7-tree-status', 'Cada nivel necesita un título.', '#ef4444');
+            return;
+        }
+        t.name = name;
+        t.levels = levels;
+        writeList(TREES_KEY, trees);
+        setStatus('p7-tree-status', `«${name}» guardado.`, '#10b981');
+        renderTrees(t.id);
+    }
+
+    function addTree() {
+        const base = trees[trees.length - 1] || DEFAULT_TREE;
+        const copy = {
+            id: uid('tree'),
+            name: `Árbol ${trees.length + 1}`,
+            levels: clone(base.levels)
+        };
+        trees.push(copy);
+        writeList(TREES_KEY, trees);
+        setStatus('p7-tree-status', 'Nuevo árbol creado. Edítalo y guarda.', '#10b981');
+        renderTrees(copy.id);
+        openTreeEditor(copy);
+        const editor = document.querySelector(`[data-p7-tree-editor="${copy.id}"]`);
+        if (editor) editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function deleteTree(id) {
+        if (trees.length <= 1) {
+            setStatus('p7-tree-status', 'Debe quedar al menos un árbol.', '#ef4444');
+            return;
+        }
+        trees = trees.filter((t) => t.id !== id);
+        writeList(TREES_KEY, trees);
+        setStatus('p7-tree-status', 'Árbol borrado.', '#9ca3af');
+        renderTrees();
+    }
+
+    document.getElementById('p7-trees-list').addEventListener('click', (event) => {
+        const editBtn = event.target.closest('[data-p7-tree-edit]');
+        if (editBtn) {
+            const t = trees.find((item) => item.id === editBtn.getAttribute('data-p7-tree-edit'));
+            if (!t) return;
+            const card = editBtn.closest('details');
+            if (card) card.open = true;
+            openTreeEditor(t);
+            return;
+        }
+        const delBtn = event.target.closest('[data-p7-tree-del]');
+        if (delBtn) {
+            deleteTree(delBtn.getAttribute('data-p7-tree-del'));
+            return;
+        }
+        const saveBtn = event.target.closest('[data-p7-tree-save]');
+        if (saveBtn) {
+            const t = trees.find((item) => item.id === saveBtn.getAttribute('data-p7-tree-save'));
+            if (t) saveTree(t);
+            return;
+        }
+        const cancelBtn = event.target.closest('[data-p7-tree-cancel]');
+        if (cancelBtn) {
+            const editor = document.querySelector(`[data-p7-tree-editor="${cancelBtn.getAttribute('data-p7-tree-cancel')}"]`);
+            if (editor) editor.style.display = 'none';
+        }
+    });
+
+    document.getElementById('p7-tree-add').addEventListener('click', addTree);
+
+    // ------------------------------------------------------------------------
+    // RECORDATORIOS ILIMITADOS POR ESTILO
     // ------------------------------------------------------------------------
     let activeFilter = 'ALL';
     let reminderIndex = 0;
@@ -17015,7 +17412,7 @@
         const type = NOTE_TYPES[typeEl.value] ? typeEl.value : 'PSICOLOGIA';
         const notes = getNotes();
         notes.unshift({
-            id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            id: uid('note'),
             type,
             text
         });
@@ -17030,13 +17427,16 @@
     }
 
     // ------------------------------------------------------------------------
-    // Eventos del panel
+    // Eventos generales
     // ------------------------------------------------------------------------
-    document.getElementById('p7-next-rule').addEventListener('click', () => showReminder(true, false));
+    function refreshPanelData() {
+        renderPyramids();
+        renderTrees();
+        renderNotes();
+        showReminder(false, true);
+    }
 
-    section.querySelectorAll('[data-p7-floor]').forEach((btn) => {
-        btn.addEventListener('click', () => renderFloor(btn.getAttribute('data-p7-floor')));
-    });
+    document.getElementById('p7-next-rule').addEventListener('click', () => showReminder(true, false));
 
     document.getElementById('p7-add-note').addEventListener('click', addNote);
     document.getElementById('p7-note-text').addEventListener('keydown', (event) => {
@@ -17061,12 +17461,13 @@
         });
     });
 
-    renderFloor('base');
+    renderPyramids();
+    renderTrees();
     renderNotes();
     showReminder(false, true);
 
     // ------------------------------------------------------------------------
-    // Acceso rápido desde el dock (navega al panel, no abre modal)
+    // Acceso rápido desde el dock (navega al panel)
     // ------------------------------------------------------------------------
     function goToPanel(event) {
         if (event) event.preventDefault();
@@ -17076,7 +17477,7 @@
         if (scrim) scrim.classList.remove('is-open');
         if (window.location.hash === '#panel-golden-rules') activatePanel();
         else window.location.hash = 'panel-golden-rules';
-        window.setTimeout(() => { renderFloor(activeFloor); renderNotes(); showReminder(false, true); }, 80);
+        window.setTimeout(refreshPanelData, 80);
     }
 
     window.openPanel7GoldenRules = goToPanel;
