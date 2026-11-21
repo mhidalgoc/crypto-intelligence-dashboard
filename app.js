@@ -17805,3 +17805,707 @@
         }, 400);
     }
 })();
+
+// ============================================================================
+// PANEL 7 · MODAL DE RECORDATORIOS, MARCO MACRO/FUNDAMENTAL Y REGLAS DE ORO
+// Se abre con el botón 🧠 Reglas de Oro (P7) del dock maestro.
+// Contenido: banner rotativo, pirámide macro, árbol de validación, notas
+// editables, semáforo de disciplina y accesos directos de investigación.
+// No modifica otros módulos: solo añade modal, estilos y trigger.
+// ============================================================================
+(function initPanel7GoldenRulesModule() {
+    // Idempotencia del modal.
+    ['panel7-golden-rules-modal', 'panel7-golden-rules-overlay', 'panel7-golden-rules-modal-style'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+    });
+
+    const NOTES_KEY = 'crypto_panel7_golden_notes_v1';
+    const NOTES_SCHEMA_KEY = 'crypto_panel7_golden_notes_schema';
+    const SEMAPHORE_KEY = 'crypto_panel7_golden_semaphore_v2';
+
+    const PHRASES = [
+        'Si no entiendes cómo genera dinero un proyecto, el dinero eres tú.',
+        'Bitcoin no lucha contra la Fed, baila al ritmo de la Fed.',
+        'Tu tarea no es predecir el próximo pump, sino sobrevivir a todos los dumps.',
+        'Protege capital primero, gana dinero después. Tu prioridad no es ganar más, es perder menos.',
+        'Cripto es un juego de información, no de dinero.',
+        'Si sientes euforia, probablemente estás tarde. Si sientes miedo, probablemente es una oportunidad.'
+    ];
+
+    const PYRAMID = [
+        {
+            title: '🔺 Cúspide',
+            percent: '10% a 15%',
+            category: 'Alto Riesgo',
+            color: '#ef4444',
+            width: '62%',
+            assets: 'Altcoins tácticas, Binance Alpha y narrativas emergentes.',
+            environment: 'Activar solo en <strong>Euforia de Liquidez</strong>. Reducir riesgo y volver a liquidez en <strong>Fin del Ciclo y Sobrevalorización</strong>.',
+            rule: 'Máximo 15% del capital. Solo con liquidez y narrativa confirmadas; salir por fases durante la euforia.'
+        },
+        {
+            title: '🔶 Nivel Medio',
+            percent: '35% a 40%',
+            category: 'Crecimiento / Layer 1 Sólidas',
+            color: '#f59e0b',
+            width: '81%',
+            assets: 'Ethereum (potencia tecnológica/ballenas), Solana (velocidad y mayor oportunidad para capital medio), SUI, XRP, BNB.',
+            environment: 'Entrada gradual en <strong>Inicio de Expansión Monetaria (QE)</strong>. Solo entradas escalonadas en 4H/1D.',
+            rule: 'Entradas escalonadas 40/35/25 en 4H/1D. No perseguir verticales ni comprar sin estructura.'
+        },
+        {
+            title: '🟩 Base',
+            percent: '40% a 50%',
+            category: 'Estabilidad y Liquidez',
+            color: '#10b981',
+            width: '100%',
+            assets: 'Stablecoins (USDT/USDC) y Bitcoin (puerto extremadamente seguro y conservador; escasez absoluta de 21M y piso económico energético).',
+            environment: 'Mayor peso en Stablecoins en entorno de <strong>Altas Tasas y Miedo</strong> (munición lista para caídas extremas).',
+            rule: 'Esta capa no se toca para perseguir altcoins. Es el escudo y la munición para comprar pánico.'
+        }
+    ];
+
+    const TREE = [
+        {
+            title: 'Contexto Macroeconómico Global',
+            body: 'Tasas de interés de la Fed (QE expansión vs. QT contracción), Liquidez Global (M2SL), Índice del Dólar (DXY, correlación inversa con BTC) y Bonos del Tesoro a 10 años (US10Y).'
+        },
+        {
+            title: 'Contexto Micro del Mercado Cripto',
+            body: 'Capitalizaciones totales (TOTAL / TOTAL2), flujos de Stablecoins, Dominancia de Bitcoin y Narrativas activas.'
+        },
+        {
+            title: 'Fundamentos y Tokenomics del Proyecto',
+            body: 'Market Cap vs. FDV (dilución), Ingresos del Protocolo (Fees), Calendario de Vesting (desbloqueos), Utilidad Real y Desarrollo activo en GitHub.'
+        },
+        {
+            title: 'Ejecución Técnica y Gestión de Riesgo',
+            body: 'Operativa 4H/1D (SMC, EMA 20/50, Fibonacci 0.618), 3 órdenes escalonadas (40/35/25), SL por ATR y riesgo máximo del 1% al 3% por operación.'
+        }
+    ];
+
+    const NOTE_TYPES = {
+        FUNDAMENTOS: { color: '#60a5fa', bg: 'rgba(96,165,250,0.10)', label: 'FUNDAMENTOS' },
+        TOKENOMICS: { color: '#f59e0b', bg: 'rgba(245,158,11,0.10)', label: 'TOKENOMICS' },
+        CICLOS: { color: '#a855f7', bg: 'rgba(168,85,247,0.12)', label: 'CICLOS' },
+        PSICOLOGIA: { color: '#ec4899', bg: 'rgba(236,72,153,0.10)', label: 'PSICOLOGÍA' }
+    };
+
+    const SEED_NOTES = [
+        {
+            id: 'p7m-seed-fundamentos',
+            type: 'FUNDAMENTOS',
+            text: 'Evaluar toda cripto como una empresa: ¿Qué problema resuelve? ¿Tiene usuarios activos o solo promesas? ¿Genera ingresos sostenibles o depende del hype?'
+        },
+        {
+            id: 'p7m-seed-tokenomics',
+            type: 'TOKENOMICS',
+            text: 'Revisar Oferta Total vs. Circulación y Vesting. Si el equipo/insiders controlan un gran porcentaje o viene un desbloqueo masivo, estás financiando su salida.'
+        },
+        {
+            id: 'p7m-seed-ciclos',
+            type: 'CICLOS',
+            text: 'Fases del Mercado: Acumulación (oportunidad) ➔ Euforia (riesgo alto) ➔ Distribución (insiders venden) ➔ Caída (limpieza).'
+        },
+        {
+            id: 'p7m-seed-psicologia',
+            type: 'PSICOLOGIA',
+            text: 'Ciclo Emocional (8 Fases): Incredulidad ➔ Optimismo ➔ Euforia ➔ Complacencia ➔ Miedo ➔ Pánico ➔ Esperanza ➔ Recuperación. El tiempo es el mejor multiplicador.'
+        }
+    ];
+
+    const DEFAULT_SEMAPHORE = {
+        green: [
+            'Fed bajando tasas / Expansión (QE), DXY y US10Y bajando.',
+            'Proyecto con ingresos reales (buen ratio MCap/Ingresos) y commits activos en GitHub.',
+            'Fase de Acumulación o Miedo generalizado + precio en zona de descuento (EMA 20/50 o Fib 0.618).'
+        ],
+        red: [
+            'Fed subiendo tasas / Contracción (QT), DXY y US10Y subiendo fuerte.',
+            'Inflación anual alta, desbloqueo (vesting) masivo próximo o valoración extrema sin ingresos.',
+            'Comprar por mitos ("estas 10 criptos te harán millonario"), en plena euforia o Revenge Trading.'
+        ]
+    };
+
+    const LINKS = [
+        {
+            group: 'Macro',
+            color: '#60a5fa',
+            items: [
+                { label: 'FRED M2SL', url: 'https://fred.stlouisfed.org/series/M2SL' },
+                { label: 'Federal Reserve', url: 'https://www.federalreserve.gov/' },
+                { label: 'Crossborder Capital', url: 'https://www.crossbordercapital.com/' }
+            ]
+        },
+        {
+            group: 'Fundamentos & Tokenomics',
+            color: '#f59e0b',
+            items: [
+                { label: 'Token Terminal', url: 'https://tokenterminal.com/' },
+                { label: 'DefiLlama', url: 'https://defillama.com/' },
+                { label: 'Artemis', url: 'https://app.artemis.xyz/' },
+                { label: 'DropsTab', url: 'https://dropstab.com/' },
+                { label: 'CryptoRank', url: 'https://cryptorank.io/' },
+                { label: 'GitHub', url: 'https://github.com/' }
+            ]
+        },
+        {
+            group: 'On-Chain',
+            color: '#10b981',
+            items: [
+                { label: 'Glassnode', url: 'https://glassnode.com/' },
+                { label: 'Etherscan', url: 'https://etherscan.io/' },
+                { label: 'Solscan', url: 'https://solscan.io/' },
+                { label: 'SuiVision', url: 'https://suivision.xyz/' }
+            ]
+        }
+    ];
+
+    function esc(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    function clone(value) {
+        return JSON.parse(JSON.stringify(value));
+    }
+
+    function uid(prefix) {
+        return prefix + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    }
+
+    // ------------------------------------------------------------------------
+    // Estilos del modal
+    // ------------------------------------------------------------------------
+    const style = document.createElement('style');
+    style.id = 'panel7-golden-rules-modal-style';
+    style.textContent = `
+        #panel7-golden-rules-modal { scrollbar-width: thin; }
+        #panel7-golden-rules-modal::-webkit-scrollbar { width: 8px; }
+        #panel7-golden-rules-modal::-webkit-scrollbar-thumb { background: #374151; border-radius: 99px; }
+        .p7m-pyramid-btn {
+            display: block; margin: 0 auto; padding: 9px 24px;
+            border: 1px solid #374151; border-radius: 6px; background: #151924;
+            color: #d1d5db; cursor: pointer; text-align: center;
+            transition: filter .15s ease, border-color .15s ease, transform .15s ease;
+            clip-path: polygon(7% 0, 93% 0, 100% 100%, 0 100%);
+        }
+        .p7m-pyramid-btn:hover { filter: brightness(1.18); }
+        .p7m-pyramid-btn.is-active { transform: scale(1.015); }
+        .p7m-filter-btn { border: 1px solid #374151; padding: 4px 8px; border-radius: 5px; font-size: 9.5px; font-weight: 700; cursor: pointer; background: #151924; color: #d1d5db; }
+        .p7m-mini-btn { background: #151924; color: #d1d5db; border: 1px solid #374151; border-radius: 5px; padding: 4px 8px; font-size: 9.5px; font-weight: 700; cursor: pointer; }
+        .p7m-mini-btn:hover { filter: brightness(1.2); border-color: #60a5fa; }
+        .p7m-note-del:hover { color: #fff !important; background: #ef4444 !important; }
+        .p7m-link { display: inline-flex; align-items: center; gap: 3px; text-decoration: none; font-size: 9.5px; font-weight: 700; padding: 4px 8px; border-radius: 5px; border: 1px solid #374151; background: #151924; color: #d1d5db; }
+        .p7m-link:hover { filter: brightness(1.25); border-color: #60a5fa; }
+        #p7m-reminder-text { transition: opacity .15s ease; }
+        #p7m-notes-list { scrollbar-width: thin; }
+        #p7m-notes-list::-webkit-scrollbar { width: 6px; }
+        #p7m-notes-list::-webkit-scrollbar-thumb { background: #374151; border-radius: 99px; }
+    `;
+    document.head.appendChild(style);
+
+    // ------------------------------------------------------------------------
+    // Overlay + modal
+    // ------------------------------------------------------------------------
+    const overlay = document.createElement('div');
+    overlay.id = 'panel7-golden-rules-overlay';
+    overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.74);z-index:999998;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);';
+
+    const modal = document.createElement('div');
+    modal.id = 'panel7-golden-rules-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-labelledby', 'p7m-title');
+    modal.style.cssText = 'display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:999999;background:#0b0e14;border:2px solid #f59e0b;border-radius:12px;width:96%;max-width:1200px;color:#f3f4f6;font-family:sans-serif;box-shadow:0 25px 65px rgba(0,0,0,0.95);padding:18px;max-height:93vh;overflow-y:auto;';
+
+    modal.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:1px solid #1f2937;padding-bottom:12px;margin-bottom:14px;flex-wrap:wrap;">
+            <div>
+                <h3 id="p7m-title" style="margin:0;color:#f59e0b;font-size:17px;">🧠 Panel 7 · Recordatorios, Marco Macro/Fundamental y Reglas de Oro</h3>
+                <span style="font-size:11px;color:#9ca3af;">Disciplina, contexto macro y fundamentos antes de ejecutar.</span>
+            </div>
+            <button id="p7m-close" type="button" style="background:#1f2937;color:#9ca3af;border:none;padding:7px 12px;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cerrar</button>
+        </div>
+
+        <!-- BANNER ROTATIVO -->
+        <div style="background:linear-gradient(90deg,#151924,#111827);border:1px solid #f59e0b;border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:240px;">
+                <div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#f59e0b;font-weight:bold;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    ⚡ Recordatorio clave
+                    <span id="p7m-reminder-index" style="font-size:9px;color:#6b7280;font-weight:normal;letter-spacing:0;">1 / ${PHRASES.length}</span>
+                </div>
+                <div id="p7m-reminder-text" style="font-size:14px;color:#fff;margin-top:4px;line-height:1.45;">Cargando recordatorio…</div>
+            </div>
+            <button id="p7m-next-rule" type="button" style="background:#1f2937;color:#f59e0b;border:1px solid #f59e0b;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;white-space:nowrap;">Siguiente regla ↻</button>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:14px;align-items:start;">
+            <!-- COLUMNA IZQUIERDA -->
+            <div>
+                <div style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:12px;margin-bottom:14px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                        <div style="font-size:13px;font-weight:bold;color:#f59e0b;">🔺 Pirámide de asignación y riesgo</div>
+                        <div style="font-size:10px;color:#6b7280;">Haz clic en un piso para ver el detalle</div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+                        ${PYRAMID.map((floor, index) => `
+                            <button type="button" class="p7m-pyramid-btn" data-p7m-floor="${index}" style="width:${floor.width};border-color:${floor.color};box-shadow:inset 0 0 18px ${floor.color}22;">
+                                <div style="font-size:10px;color:${floor.color};font-weight:bold;letter-spacing:.03em;">${esc(floor.title)} · ${esc(floor.percent)}</div>
+                                <div style="font-size:10.5px;color:#d1d5db;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(floor.category)}</div>
+                            </button>`).join('')}
+                    </div>
+                    <div id="p7m-pyramid-detail" style="background:#0b0e14;border:1px solid #1f2937;border-radius:8px;padding:10px;margin-top:12px;"></div>
+                </div>
+
+                <div style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:12px;">
+                    <div style="font-size:13px;font-weight:bold;color:#f59e0b;margin-bottom:10px;">🧭 Árbol jerárquico de validación · 4 niveles</div>
+                    ${TREE.map((node, index) => `
+                        <div style="background:#0b0e14;border:1px solid #374151;border-left:3px solid #f59e0b;border-radius:7px;padding:9px 10px;">
+                            <div style="font-size:9px;color:#f59e0b;font-weight:bold;letter-spacing:.08em;">NIVEL ${index + 1}</div>
+                            <div style="font-size:12px;color:#fff;font-weight:bold;margin:2px 0;">${esc(node.title)}</div>
+                            <div style="font-size:10.5px;color:#9ca3af;line-height:1.5;">${esc(node.body)}</div>
+                        </div>
+                        ${index < TREE.length - 1 ? '<div style="text-align:center;color:#f59e0b;font-size:13px;line-height:1;margin:3px 0;">▼</div>' : ''}
+                    `).join('')}
+                </div>
+            </div>
+
+            <!-- COLUMNA DERECHA -->
+            <div>
+                <div style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:12px;margin-bottom:14px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+                        <div style="font-size:13px;font-weight:bold;color:#f59e0b;">🗒️ Muro de notas adhesivas editables</div>
+                        <div id="p7m-notes-count" style="font-size:10px;color:#6b7280;">0 notas</div>
+                    </div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+                        <select id="p7m-note-type" aria-label="Categoría de la nota" style="background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px;border-radius:6px;font-size:11px;cursor:pointer;">
+                            <option value="FUNDAMENTOS">FUNDAMENTOS</option>
+                            <option value="TOKENOMICS">TOKENOMICS</option>
+                            <option value="CICLOS">CICLOS</option>
+                            <option value="PSICOLOGIA">PSICOLOGÍA</option>
+                        </select>
+                        <input id="p7m-note-text" type="text" maxlength="260" placeholder="Escribe una nota y pulsa Añadir…" style="flex:1;min-width:150px;background:#0b0e14;border:1px solid #374151;color:#fff;padding:7px 9px;border-radius:6px;font-size:11px;" />
+                        <button id="p7m-add-note" type="button" style="background:#3b82f6;color:#fff;border:none;padding:7px 12px;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">➕ Añadir</button>
+                    </div>
+                    <div id="p7m-filter-bar" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px;">
+                        <button type="button" class="p7m-filter-btn" data-p7m-filter="ALL">TODAS · 0</button>
+                        <button type="button" class="p7m-filter-btn" data-p7m-filter="FUNDAMENTOS">FUNDAMENTOS · 0</button>
+                        <button type="button" class="p7m-filter-btn" data-p7m-filter="TOKENOMICS">TOKENOMICS · 0</button>
+                        <button type="button" class="p7m-filter-btn" data-p7m-filter="CICLOS">CICLOS · 0</button>
+                        <button type="button" class="p7m-filter-btn" data-p7m-filter="PSICOLOGIA">PSICOLOGÍA · 0</button>
+                    </div>
+                    <div id="p7m-notes-status" style="font-size:10px;color:#6b7280;min-height:14px;margin-bottom:6px;">Se guardan en este navegador (clave ${esc(NOTES_KEY)}).</div>
+                    <div id="p7m-notes-list" style="max-height:300px;overflow-y:auto;padding-right:2px;"></div>
+                </div>
+
+                <div style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:12px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                        <div style="font-size:13px;font-weight:bold;color:#f59e0b;">🚦 Semáforo de disciplina</div>
+                        <div id="p7m-semaphore-count" style="font-size:10px;color:#6b7280;">0 reglas</div>
+                    </div>
+                    <div id="p7m-semaphore" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+                        <div style="background:rgba(16,185,129,0.08);border:1px solid #10b981;border-radius:8px;padding:10px;">
+                            <div style="font-size:11.5px;font-weight:bold;color:#10b981;">✅ LUZ VERDE (A Favor / Ejecutar)</div>
+                            <ul id="p7m-green-list" style="margin:8px 0 0 0;padding:0;list-style:none;font-size:10.5px;color:#d1d5db;line-height:1.55;"></ul>
+                            <div style="display:flex;gap:4px;margin-top:8px;">
+                                <input id="p7m-green-input" type="text" maxlength="200" placeholder="Añadir regla verde…" style="flex:1;min-width:70px;background:#0b0e14;border:1px solid #374151;color:#fff;padding:5px 7px;border-radius:5px;font-size:10px;" />
+                                <button id="p7m-green-add" type="button" title="Añadir regla verde" style="background:#10b981;color:#000;border:none;padding:5px 9px;border-radius:5px;font-size:10px;font-weight:bold;cursor:pointer;">➕</button>
+                            </div>
+                        </div>
+                        <div style="background:rgba(239,68,68,0.08);border:1px solid #ef4444;border-radius:8px;padding:10px;">
+                            <div style="font-size:11.5px;font-weight:bold;color:#ef4444;">🛑 LUZ ROJA (Peligro / Prohibido Operar)</div>
+                            <ul id="p7m-red-list" style="margin:8px 0 0 0;padding:0;list-style:none;font-size:10.5px;color:#d1d5db;line-height:1.55;"></ul>
+                            <div style="display:flex;gap:4px;margin-top:8px;">
+                                <input id="p7m-red-input" type="text" maxlength="200" placeholder="Añadir regla roja…" style="flex:1;min-width:70px;background:#0b0e14;border:1px solid #374151;color:#fff;padding:5px 7px;border-radius:5px;font-size:10px;" />
+                                <button id="p7m-red-add" type="button" title="Añadir regla roja" style="background:#ef4444;color:#fff;border:none;padding:5px 9px;border-radius:5px;font-size:10px;font-weight:bold;cursor:pointer;">➕</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PIE · ACCESOS DIRECTOS DE INVESTIGACIÓN -->
+        <div style="margin-top:14px;border-top:1px solid #1f2937;padding-top:10px;">
+            <div style="font-size:11px;font-weight:bold;color:#f59e0b;margin-bottom:8px;">🔗 Accesos directos de investigación</div>
+            ${LINKS.map((group) => `
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
+                    <span style="font-size:9.5px;font-weight:bold;color:${group.color};min-width:150px;">${esc(group.group)}</span>
+                    ${group.items.map((item) => `<a class="p7m-link" href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">${esc(item.label)} ↗</a>`).join('')}
+                </div>`).join('')}
+        </div>
+
+        <div style="margin-top:12px;font-size:10px;color:#6b7280;line-height:1.5;">
+            🧠 Regla maestra: <strong style="color:#d1d5db;">primero se protege el capital, después se busca el crecimiento</strong>. Si el árbol de validación no está completo, la respuesta es no operar.
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    document.body.appendChild(modal);
+
+    // ------------------------------------------------------------------------
+    // Notas: migración + CRUD
+    // ------------------------------------------------------------------------
+    const TYPE_MAP = {
+        ENTRADA: 'FUNDAMENTOS',
+        SALIDA: 'TOKENOMICS',
+        FUNDAMENTOS: 'FUNDAMENTOS',
+        TOKENOMICS: 'TOKENOMICS',
+        CICLOS: 'CICLOS',
+        PSICOLOGIA: 'PSICOLOGIA'
+    };
+
+    let activeFilter = 'ALL';
+    let notesCache = [];
+
+    function readNotesRaw() {
+        try {
+            const raw = localStorage.getItem(NOTES_KEY);
+            if (raw === null) return null;
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function writeNotes(notes) {
+        try { localStorage.setItem(NOTES_KEY, JSON.stringify(notes)); } catch (error) { /* almacenamiento no disponible */ }
+    }
+
+    function normalizeNote(note) {
+        if (!note || typeof note.text !== 'string' || !note.text.trim()) return null;
+        return {
+            id: typeof note.id === 'string' && note.id ? note.id : uid('note'),
+            type: TYPE_MAP[note.type] || 'FUNDAMENTOS',
+            text: note.text.trim().slice(0, 400)
+        };
+    }
+
+    function migrateNotes() {
+        const raw = readNotesRaw();
+        let notes = Array.isArray(raw) ? raw.map(normalizeNote).filter(Boolean) : [];
+        let schema = 'v2';
+        try { schema = localStorage.getItem(NOTES_SCHEMA_KEY) || ''; } catch (error) { schema = ''; }
+        if (schema !== 'v2') {
+            const missing = SEED_NOTES.filter((seed) => !notes.some((note) => note.id === seed.id || note.text === seed.text));
+            notes = [...missing.map(clone), ...notes];
+            try { localStorage.setItem(NOTES_SCHEMA_KEY, 'v2'); } catch (error) { /* almacenamiento no disponible */ }
+        }
+        writeNotes(notes);
+        notesCache = notes;
+        return notes;
+    }
+
+    function getNotes() {
+        if (notesCache.length) return notesCache;
+        return migrateNotes();
+    }
+
+    function visibleNotes() {
+        const notes = getNotes();
+        return activeFilter === 'ALL' ? notes : notes.filter((note) => note.type === activeFilter);
+    }
+
+    function updateNoteFilters() {
+        const notes = getNotes();
+        const counts = { ALL: notes.length, FUNDAMENTOS: 0, TOKENOMICS: 0, CICLOS: 0, PSICOLOGIA: 0 };
+        notes.forEach((note) => { if (counts[note.type] != null) counts[note.type] += 1; });
+        document.querySelectorAll('[data-p7m-filter]').forEach((btn) => {
+            const filter = btn.getAttribute('data-p7m-filter');
+            const meta = NOTE_TYPES[filter];
+            const active = filter === activeFilter;
+            const accent = meta ? meta.color : '#f59e0b';
+            const label = meta ? meta.label : 'TODAS';
+            btn.textContent = `${label} · ${counts[filter] || 0}`;
+            btn.style.background = active ? accent : '#151924';
+            btn.style.color = active ? '#000' : '#d1d5db';
+            btn.style.borderColor = active ? accent : '#374151';
+        });
+        const counter = document.getElementById('p7m-notes-count');
+        if (counter) counter.textContent = `${notes.length} nota${notes.length === 1 ? '' : 's'}`;
+    }
+
+    function renderNotes() {
+        const list = document.getElementById('p7m-notes-list');
+        if (!list) return;
+        const notes = visibleNotes();
+        updateNoteFilters();
+        if (!notes.length) {
+            list.innerHTML = `<div style="font-size:10.5px;color:#6b7280;padding:12px 0;text-align:center;">No hay notas ${activeFilter === 'ALL' ? 'todavía' : 'en esta categoría'}. Añade la primera.</div>`;
+            return;
+        }
+        list.innerHTML = notes.map((note) => {
+            const meta = NOTE_TYPES[note.type] || NOTE_TYPES.FUNDAMENTOS;
+            return `<div style="display:flex;gap:8px;align-items:flex-start;background:${meta.bg};border-left:3px solid ${meta.color};border-radius:6px;padding:8px;margin-bottom:6px;">
+                <div style="flex:1;min-width:0;">
+                    <span style="font-size:8px;font-weight:bold;color:${meta.color};letter-spacing:.07em;">[${meta.label}]</span>
+                    <div style="font-size:11px;color:#e5e7eb;line-height:1.45;margin-top:2px;word-break:break-word;">${esc(note.text)}</div>
+                </div>
+                <button type="button" class="p7m-note-del" data-p7m-del="${esc(note.id)}" title="Borrar nota" aria-label="Borrar nota" style="background:#151924;color:#9ca3af;border:1px solid #374151;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;flex:0 0 auto;">✕</button>
+            </div>`;
+        }).join('');
+    }
+
+    function addNote() {
+        const input = document.getElementById('p7m-note-text');
+        const typeEl = document.getElementById('p7m-note-type');
+        const status = document.getElementById('p7m-notes-status');
+        const text = (input.value || '').trim();
+        if (!text) {
+            status.textContent = 'Escribe una nota antes de guardar.';
+            status.style.color = '#ef4444';
+            input.focus();
+            return;
+        }
+        const type = NOTE_TYPES[typeEl.value] ? typeEl.value : 'FUNDAMENTOS';
+        const notes = getNotes();
+        notes.unshift({ id: uid('note'), type, text });
+        writeNotes(notes);
+        notesCache = notes;
+        input.value = '';
+        activeFilter = type;
+        status.textContent = 'Nota guardada.';
+        status.style.color = '#10b981';
+        renderNotes();
+    }
+
+    // ------------------------------------------------------------------------
+    // Semáforo (ilimitado, sembrado con las reglas del marco)
+    // ------------------------------------------------------------------------
+    function readSemaphore() {
+        try {
+            const raw = localStorage.getItem(SEMAPHORE_KEY);
+            if (raw === null) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return null;
+            return {
+                green: Array.isArray(parsed.green) ? parsed.green.filter((t) => typeof t === 'string') : [],
+                red: Array.isArray(parsed.red) ? parsed.red.filter((t) => typeof t === 'string') : []
+            };
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function writeSemaphore(data) {
+        try { localStorage.setItem(SEMAPHORE_KEY, JSON.stringify(data)); } catch (error) { /* almacenamiento no disponible */ }
+    }
+
+    function getSemaphore() {
+        const stored = readSemaphore();
+        if (stored) return stored;
+        const seed = clone(DEFAULT_SEMAPHORE);
+        writeSemaphore(seed);
+        return seed;
+    }
+
+    function renderSemaphore() {
+        const data = getSemaphore();
+        [
+            { type: 'green', listId: 'p7m-green-list' },
+            { type: 'red', listId: 'p7m-red-list' }
+        ].forEach(({ type, listId }) => {
+            const list = document.getElementById(listId);
+            if (!list) return;
+            const rules = data[type];
+            list.innerHTML = rules.length
+                ? rules.map((text, index) => `<li style="display:flex;gap:6px;align-items:flex-start;padding:3px 0;border-bottom:1px solid #1f2937;">
+                    <span style="flex:1;word-break:break-word;">${esc(text)}</span>
+                    <button type="button" data-p7m-sem-del="${type}" data-p7m-sem-index="${index}" title="Borrar regla" aria-label="Borrar regla" style="background:transparent;color:#6b7280;border:none;font-size:9px;cursor:pointer;padding:0 2px;flex:0 0 auto;">✕</button>
+                </li>`).join('')
+                : '<li style="color:#6b7280;padding:3px 0;">Sin reglas. Añade la primera.</li>';
+        });
+        const count = document.getElementById('p7m-semaphore-count');
+        if (count) count.textContent = `${data.green.length} verde · ${data.red.length} roja${data.red.length === 1 ? '' : 's'}`;
+    }
+
+    function addSemaphoreRule(type) {
+        const input = document.getElementById(type === 'green' ? 'p7m-green-input' : 'p7m-red-input');
+        if (!input) return;
+        const text = (input.value || '').trim();
+        if (!text) { input.focus(); return; }
+        const data = getSemaphore();
+        data[type].push(text.slice(0, 240));
+        writeSemaphore(data);
+        input.value = '';
+        renderSemaphore();
+    }
+
+    // ------------------------------------------------------------------------
+    // Pirámide interactiva y banner
+    // ------------------------------------------------------------------------
+    let activeFloor = 2;
+    let phraseIndex = Math.floor(Math.random() * PHRASES.length);
+
+    function renderPyramidDetail(index) {
+        activeFloor = Math.min(Math.max(index, 0), PYRAMID.length - 1);
+        const floor = PYRAMID[activeFloor];
+        const detail = document.getElementById('p7m-pyramid-detail');
+        if (!detail) return;
+        detail.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+                <div style="font-size:12px;font-weight:bold;color:${floor.color};">${esc(floor.title)} · ${esc(floor.percent)} — ${esc(floor.category)}</div>
+            </div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap;margin:8px 0;">
+                <span style="font-size:9px;color:#6b7280;width:100%;">Activos</span>
+                <span style="font-size:10px;background:#151924;border:1px solid #374151;border-radius:5px;padding:2px 7px;color:#e5e7eb;">${esc(floor.assets)}</span>
+            </div>
+            <div style="font-size:10.5px;color:#d1d5db;line-height:1.55;border-top:1px solid #1f2937;padding-top:7px;">
+                <div style="margin-bottom:4px;"><strong style="color:${floor.color};">Entorno de mercado:</strong> ${floor.environment}</div>
+                <div><strong style="color:${floor.color};">Regla estricta:</strong> ${esc(floor.rule)}</div>
+            </div>`;
+        document.querySelectorAll('[data-p7m-floor]').forEach((btn) => {
+            const isActive = Number(btn.getAttribute('data-p7m-floor')) === activeFloor;
+            btn.classList.toggle('is-active', isActive);
+            btn.style.background = isActive ? '#1f2937' : '#151924';
+            btn.style.opacity = isActive ? '1' : '0.82';
+        });
+    }
+
+    function showPhrase(next) {
+        const textEl = document.getElementById('p7m-reminder-text');
+        const indexEl = document.getElementById('p7m-reminder-index');
+        if (!textEl) return;
+        if (next) phraseIndex = (phraseIndex + 1) % PHRASES.length;
+        const apply = () => {
+            textEl.textContent = PHRASES[phraseIndex];
+            if (indexEl) indexEl.textContent = `${phraseIndex + 1} / ${PHRASES.length}`;
+            textEl.style.opacity = '1';
+        };
+        textEl.style.opacity = next ? '0' : '1';
+        if (next) window.setTimeout(apply, 130);
+        else apply();
+    }
+
+    // ------------------------------------------------------------------------
+    // Abrir / cerrar
+    // ------------------------------------------------------------------------
+    function openModal(event) {
+        if (event) event.preventDefault();
+        overlay.style.display = 'block';
+        modal.style.display = 'block';
+        modal.scrollTop = 0;
+        notesCache = [];
+        renderNotes();
+        renderSemaphore();
+        renderPyramidDetail(activeFloor);
+        showPhrase(false);
+        const status = document.getElementById('p7m-notes-status');
+        if (status) {
+            status.textContent = `Se guardan en este navegador (clave ${NOTES_KEY}).`;
+            status.style.color = '#6b7280';
+        }
+    }
+
+    function closeModal() {
+        modal.style.display = 'none';
+        overlay.style.display = 'none';
+    }
+
+    document.getElementById('p7m-close').addEventListener('click', closeModal);
+    overlay.addEventListener('click', closeModal);
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && modal.style.display === 'block') closeModal();
+    });
+
+    document.getElementById('p7m-next-rule').addEventListener('click', () => showPhrase(true));
+    document.querySelectorAll('[data-p7m-floor]').forEach((btn) => {
+        btn.addEventListener('click', () => renderPyramidDetail(Number(btn.getAttribute('data-p7m-floor'))));
+    });
+
+    document.getElementById('p7m-add-note').addEventListener('click', addNote);
+    document.getElementById('p7m-note-text').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            addNote();
+        }
+    });
+    document.getElementById('p7m-notes-list').addEventListener('click', (event) => {
+        const btn = event.target.closest('[data-p7m-del]');
+        if (!btn) return;
+        const id = btn.getAttribute('data-p7m-del');
+        const notes = getNotes().filter((note) => note.id !== id);
+        writeNotes(notes);
+        notesCache = notes;
+        renderNotes();
+    });
+    document.querySelectorAll('[data-p7m-filter]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            activeFilter = btn.getAttribute('data-p7m-filter') || 'ALL';
+            renderNotes();
+        });
+    });
+
+    document.getElementById('p7m-green-add').addEventListener('click', () => addSemaphoreRule('green'));
+    document.getElementById('p7m-red-add').addEventListener('click', () => addSemaphoreRule('red'));
+    [['green', 'p7m-green-input'], ['red', 'p7m-red-input']].forEach(([type, id]) => {
+        document.getElementById(id).addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                addSemaphoreRule(type);
+            }
+        });
+    });
+    document.getElementById('p7m-semaphore').addEventListener('click', (event) => {
+        const btn = event.target.closest('[data-p7m-sem-del]');
+        if (!btn) return;
+        const type = btn.getAttribute('data-p7m-sem-del');
+        const index = Number(btn.getAttribute('data-p7m-sem-index'));
+        const data = getSemaphore();
+        if (!data[type]) return;
+        data[type].splice(index, 1);
+        writeSemaphore(data);
+        renderSemaphore();
+    });
+
+    // ------------------------------------------------------------------------
+    // Trigger: reemplaza el botón del dock para abrir este modal
+    // ------------------------------------------------------------------------
+    function installTrigger() {
+        const oldDockBtn = document.getElementById('dock-btn-panel7');
+        if (oldDockBtn) oldDockBtn.remove();
+        const oldFallback = document.getElementById('btn-open-panel7-fallback');
+        if (oldFallback) oldFallback.remove();
+
+        const dock = document.getElementById('master-unified-bottom-dock');
+        if (dock) {
+            const btn = document.createElement('button');
+            btn.id = 'dock-btn-panel7';
+            btn.type = 'button';
+            btn.className = 'dock-btn is-amber';
+            btn.title = 'Abrir recordatorios, marco macro/fundamental y reglas de oro';
+            btn.innerHTML = '<span class="dock-icon">🧠</span><span class="dock-label">Reglas de Oro (P7)</span>';
+            btn.addEventListener('click', openModal);
+            dock.appendChild(btn);
+            return;
+        }
+
+        const fb = document.createElement('button');
+        fb.id = 'btn-open-panel7-fallback';
+        fb.type = 'button';
+        fb.style.cssText = 'position:fixed;right:16px;bottom:72px;z-index:999998;background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;border:1px solid #fcd34d;padding:9px 14px;border-radius:8px;font-size:12px;font-weight:bold;cursor:pointer;box-shadow:0 10px 24px rgba(0,0,0,0.55);';
+        fb.innerHTML = '🧠 Reglas de Oro (P7)';
+        fb.addEventListener('click', openModal);
+        document.body.appendChild(fb);
+    }
+
+    installTrigger();
+    window.setTimeout(installTrigger, 1400);
+
+    window.openPanel7GoldenRules = openModal;
+    window.Panel7Modal = Object.freeze({
+        open: openModal,
+        close: closeModal,
+        nextPhrase: () => showPhrase(true),
+        notesKey: NOTES_KEY,
+        semaphoreKey: SEMAPHORE_KEY
+    });
+
+    // Estado inicial del contenido dinámico.
+    renderPyramidDetail(activeFloor);
+    renderSemaphore();
+})();
