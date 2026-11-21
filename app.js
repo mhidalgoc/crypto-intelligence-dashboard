@@ -15218,3 +15218,975 @@
     window.navigateToPlaybook = () => { window.location.hash = 'panel-playbook'; };
 })();
 
+// ============================================================================
+// MÓDULO AUTO-INYECTABLE: LIQUIDACIONES EN VIVO & ALT/BTC
+// Se abre desde el dock "Liquidaciones & ALT/BTC" mediante #btn-open-liq-altbtc.
+// 3 pestañas: Liquidaciones en vivo (WebSocket Binance) · ALT/BTC & Alt Season · Funding & OI
+// No modifica funciones previas: solo añade modal, overlay y trigger.
+// ============================================================================
+(function initLiquidacionesAltBtcModule() {
+    ['liq-altbtc-modal', 'liq-altbtc-overlay', 'btn-open-liq-altbtc'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+    });
+
+    // ------------------------------------------------------------------------
+    // Utilidades
+    // ------------------------------------------------------------------------
+    function esc(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    function fmtUSD(num) {
+        const n = Number(num);
+        if (!Number.isFinite(n)) return '—';
+        const abs = Math.abs(n);
+        if (abs >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
+        if (abs >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M';
+        if (abs >= 1e3) return '$' + (n / 1e3).toFixed(1) + 'K';
+        if (abs >= 1) return '$' + n.toFixed(2);
+        return '$' + n.toPrecision(3);
+    }
+
+    function fmtPct(val, digits = 2) {
+        const n = Number(val);
+        if (!Number.isFinite(n)) return '—';
+        return (n >= 0 ? '+' : '') + n.toFixed(digits) + '%';
+    }
+
+    function fmtPrice(num) {
+        const n = Number(num);
+        if (!Number.isFinite(n) || n <= 0) return '—';
+        if (n >= 1000) return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+        if (n >= 1) return n.toFixed(4);
+        if (n >= 0.01) return n.toFixed(5);
+        return n.toPrecision(4);
+    }
+
+    function fmtTime(ts) {
+        const d = new Date(Number(ts) || Date.now());
+        return d.toLocaleTimeString('es-ES', { hour12: false });
+    }
+
+    function pctColor(val) {
+        const n = Number(val);
+        if (!Number.isFinite(n)) return '#9ca3af';
+        return n >= 0 ? '#10b981' : '#ef4444';
+    }
+
+    function cgKey(url) {
+        if (typeof window.QuantCoingeckoKey === 'function' && String(url).includes('api.coingecko.com')) {
+            const key = window.QuantCoingeckoKey();
+            if (key) {
+                const sep = String(url).includes('?') ? '&' : '?';
+                return url + sep + 'x_cg_demo_api_key=' + encodeURIComponent(key);
+            }
+        }
+        return url;
+    }
+
+    async function liqFetch(url, timeoutMs = 22000) {
+        url = cgKey(url);
+        const attempts = [];
+        const local = typeof window.QuantLocalProxy === 'function' ? window.QuantLocalProxy(url) : null;
+        if (local) attempts.push(local);
+        attempts.push(url);
+        attempts.push('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
+
+        if (window.QuantFetch && typeof window.QuantFetch.first === 'function') {
+            return window.QuantFetch.first(attempts, { timeout: timeoutMs, cacheKey: 'liqalt ' + url });
+        }
+
+        let lastError = null;
+        for (const target of attempts) {
+            const controller = new AbortController();
+            const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const response = await fetch(target, { cache: 'no-store', credentials: 'omit', signal: controller.signal });
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                return await response.json();
+            } catch (error) {
+                lastError = error;
+            } finally {
+                window.clearTimeout(timer);
+            }
+        }
+        throw lastError || new Error('Sin respuesta de la API');
+    }
+
+    // ------------------------------------------------------------------------
+    // Estado
+    // ------------------------------------------------------------------------
+    const ALT_BASKET = [
+        { pair: 'ETHBTC', label: 'ETH' },
+        { pair: 'SOLBTC', label: 'SOL' },
+        { pair: 'BNBBTC', label: 'BNB' },
+        { pair: 'XRPBTC', label: 'XRP' },
+        { pair: 'ADABTC', label: 'ADA' },
+        { pair: 'DOGEBTC', label: 'DOGE' },
+        { pair: 'AVAXBTC', label: 'AVAX' },
+        { pair: 'LINKBTC', label: 'LINK' }
+    ];
+
+    const FUNDING_WHITELIST = new Set([
+        'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT',
+        'LINKUSDT', 'DOTUSDT', 'LTCUSDT', 'TRXUSDT', 'BCHUSDT', 'NEARUSDT', 'ATOMUSDT', 'UNIUSDT',
+        'AAVEUSDT', 'ETCUSDT', 'FILUSDT', 'APTUSDT', 'ARBUSDT', 'OPUSDT', 'SUIUSDT', 'SEIUSDT',
+        'TIAUSDT', 'INJUSDT', 'PEPEUSDT', 'WIFUSDT', 'BONKUSDT', 'FLOKIUSDT', 'SHIBUSDT', 'WLDUSDT',
+        'FETUSDT', 'RENDERUSDT', 'TAOUSDT', 'TONUSDT', 'HBARUSDT', 'ICPUSDT', 'STXUSDT', 'IMXUSDT',
+        'GALAUSDT', 'SANDUSDT', 'MANAUSDT', 'AXSUSDT', 'GMTUSDT', 'BLURUSDT', 'ORDIUSDT', 'CRVUSDT',
+        'ONDOUSDT', 'ENAUSDT', 'JUPUSDT', 'PYTHUSDT'
+    ]);
+
+    function emptyStats() {
+        return { total: 0, long: 0, short: 0, count: 0, bySymbol: {} };
+    }
+
+    const state = {
+        open: false,
+        tab: 'liq',
+        paused: false,
+        polling: false,
+        pollTimer: null,
+        lastPollAt: 0,
+        seen: new Set(),
+        instruments: null,
+        stats: emptyStats(),
+        events: [],
+        altData: null,
+        altLoading: false,
+        fundingData: null,
+        fundingLoading: false
+    };
+
+    // ------------------------------------------------------------------------
+    // Modal + overlay
+    // ------------------------------------------------------------------------
+    const overlay = document.createElement('div');
+    overlay.id = 'liq-altbtc-overlay';
+    overlay.style.cssText = 'display:none;position:fixed;inset:0;z-index:999997;background:rgba(2,4,8,0.72);backdrop-filter:blur(3px);';
+    overlay.addEventListener('click', () => closeModal());
+    document.body.appendChild(overlay);
+
+    const modal = document.createElement('div');
+    modal.id = 'liq-altbtc-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', 'Liquidaciones y ALT/BTC');
+    modal.style.cssText = 'display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:999999;background:#0b0e14;border:2px solid #38bdf8;border-radius:12px;width:96%;max-width:1180px;color:#f3f4f6;font-family:sans-serif;box-shadow:0 25px 65px rgba(0,0,0,0.95);padding:18px;max-height:93vh;overflow-y:auto;';
+
+    modal.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid #1f2937;padding-bottom:12px;margin-bottom:12px;flex-wrap:wrap;gap:10px;">
+            <div>
+                <h3 style="margin:0;color:#38bdf8;font-size:17px;">🧲 Liquidaciones &amp; ALT/BTC</h3>
+                <span style="font-size:11px;color:#9ca3af;">Liquidaciones recientes de OKX SWAP · Índice ALT/BTC de 90 días · Funding y Open Interest.</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <button id="liq-refresh" type="button" style="background:#1f2937;color:#38bdf8;border:1px solid #38bdf8;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;">🔄 Refrescar</button>
+                <button id="liq-close" type="button" style="background:#1f2937;color:#9ca3af;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cerrar</button>
+            </div>
+        </div>
+
+        <div id="liq-tabbar" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
+            <button type="button" class="liq-tab" data-liq-tab="liq" style="background:#38bdf8;color:#000;border:none;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">🧲 Liquidaciones en vivo</button>
+            <button type="button" class="liq-tab" data-liq-tab="altbtc" style="background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">📊 ALT/BTC &amp; Alt Season</button>
+            <button type="button" class="liq-tab" data-liq-tab="funding" style="background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">💹 Funding &amp; OI</button>
+        </div>
+
+        <!-- PESTAÑA 1 · LIQUIDACIONES -->
+        <div class="liq-pane" data-liq-pane="liq">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                <div id="liq-ws-status" style="font-size:11px;color:#9ca3af;">○ Feed en espera.</div>
+                <div style="display:flex;gap:6px;">
+                    <button id="liq-ws-toggle" type="button" style="background:#1f2937;color:#f59e0b;border:1px solid #f59e0b;padding:5px 10px;border-radius:5px;cursor:pointer;font-size:11px;font-weight:bold;">⏸ Pausar</button>
+                    <button id="liq-reset" type="button" style="background:#1f2937;color:#9ca3af;border:1px solid #374151;padding:5px 10px;border-radius:5px;cursor:pointer;font-size:11px;font-weight:bold;">🧹 Reiniciar</button>
+                </div>
+            </div>
+
+            <div id="liq-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:12px;"></div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-bottom:12px;">
+                <div style="background:#0f1420;border:1px solid #1f2937;border-radius:8px;padding:10px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                        <strong style="font-size:12px;color:#e5e7eb;">Top símbolos liquidados</strong>
+                        <span style="font-size:9px;color:#9ca3af;"><span style="color:#ef4444;">■</span> Longs &nbsp;<span style="color:#10b981;">■</span> Shorts</span>
+                    </div>
+                    <div id="liq-bars"></div>
+                </div>
+                <div style="background:#0f1420;border:1px solid #1f2937;border-radius:8px;padding:10px;">
+                    <strong style="font-size:12px;color:#e5e7eb;">Resumen por símbolo</strong>
+                    <div id="liq-symbol-table" style="margin-top:6px;"></div>
+                </div>
+            </div>
+
+            <div style="background:#0f1420;border:1px solid #1f2937;border-radius:8px;padding:10px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                    <strong style="font-size:12px;color:#e5e7eb;">Feed en vivo</strong>
+                    <span id="liq-feed-count" style="font-size:10px;color:#6b7280;">0 eventos</span>
+                </div>
+                <div id="liq-feed" style="max-height:250px;overflow-y:auto;"></div>
+            </div>
+
+            <div style="font-size:10px;color:#6b7280;margin-top:8px;line-height:1.5;">
+                Fuente: OKX SWAP (liquidaciones públicas). Se consultan BTC, ETH, SOL, XRP, DOGE, BNB, ADA, AVAX, LINK, SUI, PEPE y WIF cada 20 s. Los totales incluyen los últimos 30 minutos al abrir y se acumulan mientras el módulo está activo; se reinician con 🧹.
+                Una liquidación <span style="color:#ef4444;">LONG</span> es una venta forzada; una <span style="color:#10b981;">SHORT</span> es una compra forzada.
+            </div>
+        </div>
+
+        <!-- PESTAÑA 2 · ALT/BTC -->
+        <div class="liq-pane" data-liq-pane="altbtc" style="display:none;">
+            <div id="altbtc-status" style="font-size:11px;color:#9ca3af;margin-bottom:8px;">Pulsa Refrescar para construir el índice ALT/BTC.</div>
+            <div id="altbtc-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:12px;"></div>
+            <div style="background:#0f1420;border:1px solid #1f2937;border-radius:8px;padding:10px;margin-bottom:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
+                    <strong style="font-size:12px;color:#e5e7eb;">Índice ALT/BTC · 90 días (base 100)</strong>
+                    <span style="font-size:9px;color:#9ca3af;">Media equiponderada de 8 pares ALT/BTC de Binance Spot</span>
+                </div>
+                <div id="altbtc-chart"></div>
+            </div>
+            <div style="background:#0f1420;border:1px solid #1f2937;border-radius:8px;padding:10px;">
+                <strong style="font-size:12px;color:#e5e7eb;">Desempeño relativo vs BTC</strong>
+                <div id="altbtc-table" style="margin-top:6px;"></div>
+            </div>
+            <div style="font-size:10px;color:#6b7280;margin-top:8px;line-height:1.5;">
+                El índice sube cuando las alts ganan terreno a BTC. Un valor &gt;100 significa que la canasta supera a BTC desde el inicio de la ventana.
+                Alt Season Score combina el % de pares que superan a BTC en 30 días y la tendencia del índice.
+            </div>
+        </div>
+
+        <!-- PESTAÑA 3 · FUNDING -->
+        <div class="liq-pane" data-liq-pane="funding" style="display:none;">
+            <div id="funding-status" style="font-size:11px;color:#9ca3af;margin-bottom:8px;">Pulsa Refrescar para cargar funding y open interest.</div>
+            <div id="funding-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:12px;"></div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;">
+                <div style="background:#0f1420;border:1px solid #1f2937;border-radius:8px;padding:10px;">
+                    <strong style="font-size:12px;color:#ef4444;">Funding más positivo · longs pagan</strong>
+                    <div style="font-size:10px;color:#6b7280;margin:2px 0 6px;">Posicionamiento alcista congestionado: riesgo de long squeeze.</div>
+                    <div id="funding-long-table"></div>
+                </div>
+                <div style="background:#0f1420;border:1px solid #1f2937;border-radius:8px;padding:10px;">
+                    <strong style="font-size:12px;color:#10b981;">Funding más negativo · shorts pagan</strong>
+                    <div style="font-size:10px;color:#6b7280;margin:2px 0 6px;">Posicionamiento bajista congestionado: riesgo de short squeeze.</div>
+                    <div id="funding-short-table"></div>
+                </div>
+            </div>
+            <div style="font-size:10px;color:#6b7280;margin-top:8px;line-height:1.5;">
+                Fuente: Binance Futures <code>premiumIndex</code> y <code>openInterestHist</code>. Funding anualizado = tasa de 8h × 3 × 365.
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    // ------------------------------------------------------------------------
+    // Trigger oculto para el dock existente (#dock-open-liq busca este ID)
+    // ------------------------------------------------------------------------
+    const trigger = document.createElement('button');
+    trigger.id = 'btn-open-liq-altbtc';
+    trigger.type = 'button';
+    trigger.style.display = 'none';
+    trigger.addEventListener('click', openModal);
+    document.body.appendChild(trigger);
+
+    // ------------------------------------------------------------------------
+    // Pestañas
+    // ------------------------------------------------------------------------
+    function switchTab(tab) {
+        state.tab = tab;
+        modal.querySelectorAll('.liq-tab').forEach((b) => {
+            const active = b.getAttribute('data-liq-tab') === tab;
+            b.style.background = active ? '#38bdf8' : '#1f2937';
+            b.style.color = active ? '#000' : '#d1d5db';
+            b.style.border = active ? 'none' : '1px solid #374151';
+        });
+        modal.querySelectorAll('.liq-pane').forEach((p) => {
+            p.style.display = p.getAttribute('data-liq-pane') === tab ? 'block' : 'none';
+        });
+
+        if (tab === 'liq') {
+            if (state.open && !state.paused) connectWs();
+        } else {
+            stopWs('Feed en pausa (pestaña inactiva).');
+        }
+        if (tab === 'altbtc') loadAltBtc(false);
+        if (tab === 'funding') loadFunding(false);
+    }
+
+    document.getElementById('liq-tabbar').addEventListener('click', (e) => {
+        const btn = e.target.closest('.liq-tab');
+        if (btn) switchTab(btn.getAttribute('data-liq-tab'));
+    });
+
+    // ------------------------------------------------------------------------
+    // Abrir / cerrar
+    // ------------------------------------------------------------------------
+    function openModal() {
+        state.open = true;
+        overlay.style.display = 'block';
+        modal.style.display = 'block';
+        switchTab(state.tab || 'liq');
+        renderLiqDashboard();
+    }
+
+    function closeModal() {
+        state.open = false;
+        overlay.style.display = 'none';
+        modal.style.display = 'none';
+        stopWs('Feed en pausa (módulo cerrado).');
+    }
+
+    document.getElementById('liq-close').addEventListener('click', closeModal);
+
+    if (window.__liqAltBtcEsc) document.removeEventListener('keydown', window.__liqAltBtcEsc);
+    window.__liqAltBtcEsc = (event) => {
+        if (event.key === 'Escape' && modal.style.display === 'block') closeModal();
+    };
+    document.addEventListener('keydown', window.__liqAltBtcEsc);
+
+    document.getElementById('liq-refresh').addEventListener('click', () => {
+        if (state.tab === 'liq') {
+            stopWs('');
+            connectWs();
+            renderLiqDashboard();
+        } else if (state.tab === 'altbtc') {
+            loadAltBtc(true);
+        } else {
+            loadFunding(true);
+        }
+    });
+
+    // ------------------------------------------------------------------------
+    // ------------------------------------------------------------------------
+    // PESTAÑA 1 · LIQUIDACIONES (OKX SWAP, sondeo cada 20 s)
+    // ------------------------------------------------------------------------
+    const LIQ_UNDERLYINGS = [
+        'BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'BNB',
+        'ADA', 'AVAX', 'LINK', 'SUI', 'PEPE', 'WIF'
+    ];
+    const LIQ_POLL_MS = 20000;
+    const LIQ_SEED_MS = 30 * 60 * 1000;
+
+    function setWsStatus(kind, text) {
+        const el = document.getElementById('liq-ws-status');
+        if (!el) return;
+        const colors = { live: '#10b981', connecting: '#f59e0b', error: '#ef4444', paused: '#9ca3af', idle: '#6b7280' };
+        const dots = { live: '●', connecting: '◌', error: '●', paused: '❚❚', idle: '○' };
+        el.innerHTML = `<span style="color:${colors[kind] || '#9ca3af'};">${dots[kind] || '○'} ${esc(text)}</span>`;
+    }
+
+    function stopWs(reason) {
+        state.polling = false;
+        if (state.pollTimer) {
+            window.clearInterval(state.pollTimer);
+            state.pollTimer = null;
+        }
+        if (reason) setWsStatus(reason === 'Feed pausado por el usuario.' ? 'paused' : 'idle', reason);
+    }
+
+    async function loadOkxInstruments() {
+        if (state.instruments && Object.keys(state.instruments).length) return state.instruments;
+        const map = {};
+        const results = await Promise.allSettled(LIQ_UNDERLYINGS.map((sym) =>
+            liqFetch(`https://www.okx.com/api/v5/public/instruments?instType=SWAP&instId=${sym}-USDT-SWAP`, 15000)
+        ));
+        results.forEach((res, index) => {
+            if (res.status !== 'fulfilled') return;
+            const row = (res.value && Array.isArray(res.value.data)) ? res.value.data[0] : null;
+            if (!row) return;
+            const ctVal = Number(row.ctVal);
+            if (Number.isFinite(ctVal) && ctVal > 0) {
+                map[LIQ_UNDERLYINGS[index]] = { ctVal, ctValCcy: row.ctValCcy || '' };
+            }
+        });
+        state.instruments = map;
+        return map;
+    }
+
+    function connectWs() {
+        if (!state.open || state.tab !== 'liq' || state.paused) return;
+        if (state.polling) return;
+        state.polling = true;
+        setWsStatus('connecting', 'Consultando liquidaciones de OKX SWAP…');
+        pollLiquidations(true);
+        state.pollTimer = window.setInterval(() => pollLiquidations(false), LIQ_POLL_MS);
+    }
+
+    async function pollLiquidations(initial) {
+        if (!state.polling) return;
+        try {
+            const instruments = await loadOkxInstruments();
+            const results = await Promise.allSettled(LIQ_UNDERLYINGS.map((sym) =>
+                liqFetch(`https://www.okx.com/api/v5/public/liquidation-orders?instType=SWAP&state=filled&uly=${sym}-USDT`, 18000)
+            ));
+            if (!state.polling) return;
+            const now = Date.now();
+            const cutoff = (initial || state.stats.count === 0) ? now - LIQ_SEED_MS : state.lastPollAt - 60000;
+            let added = 0;
+            let failed = 0;
+
+            results.forEach((res, index) => {
+                if (res.status !== 'fulfilled') { failed += 1; return; }
+                const sym = LIQ_UNDERLYINGS[index];
+                const meta = instruments[sym];
+                if (!meta) { failed += 1; return; }
+                const data = res.value && Array.isArray(res.value.data) ? res.value.data : [];
+                data.forEach((group) => {
+                    const details = Array.isArray(group.details) ? group.details : [];
+                    details.forEach((detail) => {
+                        const ts = Number(detail.ts || detail.time);
+                        if (!Number.isFinite(ts) || ts < cutoff) return;
+                        const key = `${sym}|${ts}|${detail.bkPx}|${detail.sz}|${detail.posSide}|${detail.side}`;
+                        if (state.seen.has(key)) return;
+                        state.seen.add(key);
+                        const price = Number(detail.bkPx);
+                        const contracts = Number(detail.sz);
+                        if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(contracts) || contracts <= 0) return;
+                        const notional = contracts * meta.ctVal * price;
+                        if (!Number.isFinite(notional) || notional <= 0) return;
+                        const side = String(detail.posSide || '').toLowerCase() === 'long' ? 'long' : 'short';
+                        ingestEvent({
+                            symbol: sym + 'USDT',
+                            side,
+                            price,
+                            qty: contracts * meta.ctVal,
+                            notional,
+                            ts
+                        });
+                        added += 1;
+                    });
+                });
+            });
+
+            if (state.seen.size > 8000) {
+                state.seen = new Set([...state.seen].slice(-4000));
+            }
+            state.events.sort((a, b) => b.ts - a.ts);
+            state.lastPollAt = now;
+            if (added > 0) renderLiqDashboard();
+
+            const time = new Date(now).toLocaleTimeString('es-ES', { hour12: false });
+            if (failed === LIQ_UNDERLYINGS.length) {
+                setWsStatus('error', `OKX no respondió (${time}). Reintentando en ${LIQ_POLL_MS / 1000}s…`);
+            } else if (added > 0) {
+                setWsStatus('live', `OKX SWAP · ${added} nueva(s) · ${time}`);
+            } else {
+                setWsStatus('live', `OKX SWAP · sin nuevas · ${time}`);
+            }
+        } catch (error) {
+            setWsStatus('error', `Error al consultar OKX: ${error.message}`);
+        }
+    }
+
+    function ingestEvent(event) {
+        const symbol = event.symbol;
+        const side = event.side;
+        const notional = event.notional;
+        state.stats[side] += notional;
+        state.stats.total += notional;
+        state.stats.count += 1;
+
+        const bucket = state.stats.bySymbol[symbol] || (state.stats.bySymbol[symbol] = { long: 0, short: 0, count: 0, max: 0 });
+        bucket[side] += notional;
+        bucket.count += 1;
+        bucket.max = Math.max(bucket.max, notional);
+
+        state.events.push({
+            symbol,
+            side,
+            price: event.price,
+            qty: event.qty,
+            notional,
+            ts: event.ts
+        });
+        if (state.events.length > 150) state.events.length = 150;
+    }
+
+    let liqRenderTimer = null;
+    function scheduleLiqRender() {
+        if (liqRenderTimer) return;
+        liqRenderTimer = window.setTimeout(() => {
+            liqRenderTimer = null;
+            if (state.tab === 'liq' && state.open) renderLiqDashboard();
+        }, 600);
+    }
+
+    function kpiCard(label, value, sub, color) {
+        return `<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:10px;">
+            <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;">${esc(label)}</div>
+            <div style="font-size:18px;font-weight:bold;color:${color || '#fff'};margin-top:3px;">${value}</div>
+            ${sub ? `<div style="font-size:9px;color:#6b7280;margin-top:2px;">${sub}</div>` : ''}
+        </div>`;
+    }
+
+    function topSymbols(limit) {
+        return Object.keys(state.stats.bySymbol)
+            .map((symbol) => ({ symbol, ...state.stats.bySymbol[symbol] }))
+            .sort((a, b) => (b.long + b.short) - (a.long + a.short))
+            .slice(0, limit);
+    }
+
+    function renderBars() {
+        const rows = topSymbols(7);
+        const el = document.getElementById('liq-bars');
+        if (!rows.length) {
+            el.innerHTML = '<div style="font-size:11px;color:#6b7280;padding:14px 0;">Aún no hay liquidaciones. El feed se llena en cuanto llega el primer evento.</div>';
+            return;
+        }
+        const W = 520;
+        const rowH = 27;
+        const H = rows.length * rowH + 6;
+        const max = Math.max(...rows.map((r) => r.long + r.short), 1);
+        const barW = W - 190;
+        const svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:#090d16;border-radius:6px;">
+            ${rows.map((r, i) => {
+                const y = 4 + i * rowH;
+                const total = r.long + r.short;
+                const wTotal = Math.max((total / max) * barW, 2);
+                const wLong = total > 0 ? (r.long / total) * wTotal : 0;
+                return `<text x="4" y="${y + 13}" fill="#d1d5db" font-size="10" font-family="sans-serif">${esc(r.symbol.replace('USDT', ''))}</text>
+                    <rect x="68" y="${y + 3}" width="${wLong.toFixed(1)}" height="14" fill="#ef4444" rx="2"/>
+                    <rect x="${(68 + wLong).toFixed(1)}" y="${y + 3}" width="${Math.max(wTotal - wLong, 0).toFixed(1)}" height="14" fill="#10b981" rx="2"/>
+                    <text x="${(74 + wTotal).toFixed(1)}" y="${y + 14}" fill="#9ca3af" font-size="10" font-family="sans-serif">${fmtUSD(total)}</text>`;
+            }).join('')}
+        </svg>`;
+        el.innerHTML = svg;
+    }
+
+    function renderSymbolTable() {
+        const rows = topSymbols(10);
+        const el = document.getElementById('liq-symbol-table');
+        if (!rows.length) {
+            el.innerHTML = '<div style="font-size:11px;color:#6b7280;padding:10px 0;">Sin datos todavía.</div>';
+            return;
+        }
+        el.innerHTML = `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:11px;text-align:left;">
+            <thead><tr style="color:#9ca3af;border-bottom:1px solid #1f2937;">
+                <th style="padding:5px;">Par</th><th style="padding:5px;">Longs</th><th style="padding:5px;">Shorts</th>
+                <th style="padding:5px;">Total</th><th style="padding:5px;">Mayor</th>
+            </tr></thead>
+            <tbody>${rows.map((r) => `<tr style="border-bottom:1px solid #111827;">
+                <td style="padding:5px;font-weight:bold;color:#fff;">${esc(r.symbol.replace('USDT', ''))}</td>
+                <td style="padding:5px;color:#ef4444;">${fmtUSD(r.long)}</td>
+                <td style="padding:5px;color:#10b981;">${fmtUSD(r.short)}</td>
+                <td style="padding:5px;color:#e5e7eb;">${fmtUSD(r.long + r.short)}</td>
+                <td style="padding:5px;color:#f59e0b;">${fmtUSD(r.max)}</td>
+            </tr>`).join('')}</tbody>
+        </table></div>`;
+    }
+
+    function renderFeed() {
+        const el = document.getElementById('liq-feed');
+        const count = document.getElementById('liq-feed-count');
+        if (count) count.textContent = `${state.stats.count} eventos · mostrando ${Math.min(state.events.length, 40)}`;
+        if (!state.events.length) {
+            el.innerHTML = '<div style="font-size:11px;color:#6b7280;padding:14px 0;">Esperando la primera liquidación…</div>';
+            return;
+        }
+        el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:11px;text-align:left;">
+            <thead style="position:sticky;top:0;background:#0f1420;color:#9ca3af;"><tr>
+                <th style="padding:5px;">Hora</th><th style="padding:5px;">Par</th><th style="padding:5px;">Lado</th>
+                <th style="padding:5px;">Precio</th><th style="padding:5px;">Cantidad</th><th style="padding:5px;">Notional</th>
+            </tr></thead>
+            <tbody>${state.events.slice(0, 40).map((e) => {
+                const isLong = e.side === 'long';
+                const color = isLong ? '#ef4444' : '#10b981';
+                return `<tr style="border-bottom:1px solid #111827;">
+                    <td style="padding:5px;color:#6b7280;">${fmtTime(e.ts)}</td>
+                    <td style="padding:5px;font-weight:bold;color:#fff;">${esc(e.symbol.replace('USDT', ''))}</td>
+                    <td style="padding:5px;color:${color};font-weight:bold;">${isLong ? 'LONG' : 'SHORT'}</td>
+                    <td style="padding:5px;color:#d1d5db;">${fmtPrice(e.price)}</td>
+                    <td style="padding:5px;color:#9ca3af;">${Number(e.qty).toLocaleString('en-US', { maximumFractionDigits: 4 })}</td>
+                    <td style="padding:5px;color:${color};font-weight:bold;">${fmtUSD(e.notional)}</td>
+                </tr>`;
+            }).join('')}</tbody>
+        </table>`;
+    }
+
+    function renderLiqDashboard() {
+        const kpis = document.getElementById('liq-kpis');
+        if (!kpis) return;
+        const ratio = state.stats.short > 0 ? state.stats.long / state.stats.short : null;
+        kpis.innerHTML = [
+            kpiCard('Total liquidado', fmtUSD(state.stats.total), `${state.stats.count} eventos`, '#38bdf8'),
+            kpiCard('Longs liquidados', fmtUSD(state.stats.long), ratio == null ? '—' : `Ratio L/S ${ratio.toFixed(2)}`, '#ef4444'),
+            kpiCard('Shorts liquidados', fmtUSD(state.stats.short), state.stats.total > 0 ? `${((state.stats.short / state.stats.total) * 100).toFixed(1)}% del total` : '—', '#10b981'),
+            kpiCard('Ratio Long/Short', ratio == null ? '—' : ratio.toFixed(2), ratio == null ? 'Sin shorts aún' : (ratio > 1 ? 'Presión de longs' : 'Presión de shorts'), ratio == null ? '#9ca3af' : (ratio > 1 ? '#ef4444' : '#10b981'))
+        ].join('');
+        renderBars();
+        renderSymbolTable();
+        renderFeed();
+    }
+
+    document.getElementById('liq-ws-toggle').addEventListener('click', (e) => {
+        const btn = e.currentTarget;
+        if (state.paused) {
+            state.paused = false;
+            btn.textContent = '⏸ Pausar';
+            btn.style.color = '#f59e0b';
+            btn.style.borderColor = '#f59e0b';
+            connectWs();
+        } else {
+            state.paused = true;
+            btn.textContent = '▶ Reanudar';
+            btn.style.color = '#10b981';
+            btn.style.borderColor = '#10b981';
+            stopWs('Feed pausado por el usuario.');
+        }
+    });
+
+    document.getElementById('liq-reset').addEventListener('click', () => {
+        state.stats = emptyStats();
+        state.events = [];
+        renderLiqDashboard();
+        setWsStatus(state.paused ? 'paused' : 'live', state.paused ? 'Feed pausado por el usuario.' : 'Contadores reiniciados. OKX SWAP se actualiza cada 20 s.');
+    });
+
+    // PESTAÑA 2 · ALT/BTC & ALT SEASON
+    // ------------------------------------------------------------------------
+    function setTabStatus(id, kind, text) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const colors = { ok: '#10b981', loading: '#f59e0b', error: '#ef4444', idle: '#9ca3af' };
+        const icons = { ok: '✅', loading: '⏳', error: '⚠️', idle: 'ℹ️' };
+        el.innerHTML = `<span style="color:${colors[kind] || '#9ca3af'};">${icons[kind] || ''} ${esc(text)}</span>`;
+    }
+
+    function miniSpark(closes, color) {
+        if (!Array.isArray(closes) || closes.length < 2) return '';
+        const W = 110;
+        const H = 26;
+        const min = Math.min(...closes);
+        const max = Math.max(...closes);
+        const span = (max - min) || 1;
+        const pts = closes.map((v, i) => {
+            const x = 1 + (i / (closes.length - 1)) * (W - 2);
+            const y = H - 2 - ((v - min) / span) * (H - 4);
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+        }).join(' ');
+        return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.4"/></svg>`;
+    }
+
+    function altChartSvg(series) {
+        const W = 1000;
+        const H = 260;
+        const padL = 46;
+        const padR = 14;
+        const padT = 16;
+        const padB = 26;
+        const vals = series.map((p) => p.v);
+        const min = Math.min(...vals);
+        const max = Math.max(...vals);
+        const span = (max - min) || 1;
+        const x = (i) => padL + (i / (series.length - 1)) * (W - padL - padR);
+        const y = (v) => padT + (1 - (v - min) / span) * (H - padT - padB);
+        const pts = series.map((p, i) => `${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+        const area = `${padL},${(H - padB).toFixed(1)} ${pts} ${(W - padR).toFixed(1)},${(H - padB).toFixed(1)}`;
+        const y100 = y(100);
+        const first = series[0];
+        const last = series[series.length - 1];
+        return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:240px;background:#090d16;border-radius:6px;">
+            <defs>
+                <linearGradient id="altbtcFillGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.34"/>
+                    <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.02"/>
+                </linearGradient>
+            </defs>
+            <line x1="${padL}" y1="${y100.toFixed(1)}" x2="${W - padR}" y2="${y100.toFixed(1)}" stroke="#6b7280" stroke-dasharray="4 4" stroke-width="1"/>
+            <text x="${padL + 4}" y="${(y100 - 4).toFixed(1)}" fill="#6b7280" font-size="9" font-family="sans-serif">100 (base)</text>
+            <polygon points="${area}" fill="url(#altbtcFillGrad)"/>
+            <polyline points="${pts}" fill="none" stroke="#38bdf8" stroke-width="2"/>
+            <circle cx="${x(series.length - 1).toFixed(1)}" cy="${y(last.v).toFixed(1)}" r="3.5" fill="#38bdf8"/>
+            <text x="${padL}" y="${H - 7}" fill="#9ca3af" font-size="9" font-family="sans-serif">${new Date(first.t).toLocaleDateString('es-ES')}</text>
+            <text x="${W - padR}" y="${H - 7}" fill="#9ca3af" font-size="9" font-family="sans-serif" text-anchor="end">${new Date(last.t).toLocaleDateString('es-ES')}</text>
+            <text x="${W - padR}" y="${padT + 10}" fill="#e5e7eb" font-size="11" font-family="sans-serif" text-anchor="end">${last.v.toFixed(1)}</text>
+            <text x="${padL + 4}" y="${padT + 10}" fill="#6b7280" font-size="9" font-family="sans-serif">máx ${max.toFixed(1)} · mín ${min.toFixed(1)}</text>
+        </svg>`;
+    }
+
+    function altSeasonScore(series, pairs) {
+        const last = series[series.length - 1].v;
+        const ref = series.length > 30 ? series[series.length - 31].v : series[0].v;
+        const d30 = ref > 0 ? ((last / ref) - 1) * 100 : 0;
+        const outperform = pairs.length ? pairs.filter((p) => Number.isFinite(p.d30) && p.d30 > 0).length / pairs.length * 100 : 0;
+        const trend = Math.max(0, Math.min(50, ((d30 + 20) / 40) * 50));
+        const score = Math.round(outperform * 0.5 + trend);
+        let label = 'BTC Season';
+        let color = '#ef4444';
+        if (score >= 75) { label = 'Alt Season'; color = '#10b981'; }
+        else if (score >= 50) { label = 'Rotación a alts'; color = '#facc15'; }
+        else if (score >= 25) { label = 'Neutral'; color = '#f59e0b'; }
+        return { score, label, color, d30, outperform };
+    }
+
+    async function loadAltBtc(force) {
+        if (state.altLoading) return;
+        if (state.altData && !force) {
+            renderAltBtc();
+            return;
+        }
+        state.altLoading = true;
+        setTabStatus('altbtc-status', 'loading', 'Descargando 90 días de 8 pares ALT/BTC desde Binance Spot…');
+
+        try {
+            const results = await Promise.allSettled(ALT_BASKET.map((asset) =>
+                liqFetch(`https://api.binance.com/api/v3/klines?symbol=${asset.pair}&interval=1d&limit=91`, 25000)
+                    .then((rows) => ({ asset, rows }))
+            ));
+
+            const seriesList = [];
+            const failed = [];
+            for (const result of results) {
+                if (result.status !== 'fulfilled') {
+                    failed.push('red');
+                    continue;
+                }
+                const { asset, rows } = result.value;
+                if (!Array.isArray(rows) || rows.length < 10) {
+                    failed.push(asset.label);
+                    continue;
+                }
+                const map = new Map();
+                rows.forEach((row) => {
+                    const t = Number(row[0]);
+                    const c = Number(row[4]);
+                    if (Number.isFinite(t) && Number.isFinite(c) && c > 0) map.set(t, c);
+                });
+                if (map.size >= 10) seriesList.push({ ...asset, map });
+                else failed.push(asset.label);
+            }
+
+            if (!seriesList.length) throw new Error('Binance no devolvió datos de los pares ALT/BTC. Puede ser un bloqueo regional o de red.');
+
+            const common = [...seriesList[0].map.keys()]
+                .filter((t) => seriesList.every((s) => s.map.has(t)))
+                .sort((a, b) => a - b);
+            if (common.length < 10) throw new Error('Historial insuficiente para construir el índice ALT/BTC.');
+
+            const base = common[0];
+            const idxSeries = common.map((t) => {
+                const avg = seriesList.reduce((acc, s) => acc + (s.map.get(t) / s.map.get(base)), 0) / seriesList.length;
+                return { t, v: avg * 100 };
+            });
+
+            const pairs = seriesList.map((s) => {
+                const closes = common.map((t) => s.map.get(t));
+                const last = closes[closes.length - 1];
+                const change = (n) => closes.length > n ? ((last / closes[closes.length - 1 - n]) - 1) * 100 : null;
+                return {
+                    pair: s.pair,
+                    label: s.label,
+                    last,
+                    d1: change(1),
+                    d7: change(7),
+                    d30: change(30),
+                    d90: ((last / closes[0]) - 1) * 100,
+                    closes
+                };
+            }).sort((a, b) => b.d30 - a.d30);
+
+            let btc = null;
+            try {
+                const btcRows = await liqFetch('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=91', 25000);
+                const closes = btcRows.map((row) => Number(row[4])).filter(Number.isFinite);
+                if (closes.length > 1) {
+                    const last = closes[closes.length - 1];
+                    btc = {
+                        last,
+                        d30: closes.length > 30 ? ((last / closes[closes.length - 31]) - 1) * 100 : null,
+                        d90: ((last / closes[0]) - 1) * 100
+                    };
+                }
+            } catch (e) { /* BTC es opcional */ }
+
+            let dominance = null;
+            try {
+                const global = await liqFetch('https://api.coingecko.com/api/v3/global', 18000);
+                if (global && global.data && global.data.market_cap_percentage) {
+                    const dom = Number(global.data.market_cap_percentage.btc);
+                    if (Number.isFinite(dom)) dominance = dom;
+                }
+            } catch (e) { /* dominancia opcional */ }
+
+            state.altData = { idxSeries, pairs, btc, dominance, failed, at: Date.now() };
+            renderAltBtc();
+            const suffix = failed.length ? ` (${failed.length} pares sin datos)` : '';
+            setTabStatus('altbtc-status', 'ok', `Índice construido con ${pairs.length} pares y ${idxSeries.length} días${suffix}.`);
+        } catch (error) {
+            setTabStatus('altbtc-status', 'error', error.message || 'No se pudo construir el índice ALT/BTC.');
+            document.getElementById('altbtc-kpis').innerHTML = '';
+            document.getElementById('altbtc-chart').innerHTML = `<div style="font-size:11px;color:#fca5a5;padding:16px;">${esc(error.message || 'Error de datos')}</div>`;
+            document.getElementById('altbtc-table').innerHTML = '';
+        } finally {
+            state.altLoading = false;
+        }
+    }
+
+    function renderAltBtc() {
+        const data = state.altData;
+        if (!data) return;
+        const season = altSeasonScore(data.idxSeries, data.pairs);
+        const last = data.idxSeries[data.idxSeries.length - 1].v;
+        const first = data.idxSeries[0].v;
+        const d90 = ((last / first) - 1) * 100;
+        const d7ref = data.idxSeries.length > 7 ? data.idxSeries[data.idxSeries.length - 8].v : first;
+        const d7 = ((last / d7ref) - 1) * 100;
+
+        document.getElementById('altbtc-kpis').innerHTML = [
+            kpiCard('Índice ALT/BTC', last.toFixed(1), 'Base 100 · 90 días', '#38bdf8'),
+            kpiCard('30 días', fmtPct(season.d30), `${season.outperform.toFixed(0)}% de alts superan a BTC`, pctColor(season.d30)),
+            kpiCard('7 días', fmtPct(d7), 'Tendencia de corto plazo', pctColor(d7)),
+            kpiCard('90 días', fmtPct(d90), 'Ventana completa', pctColor(d90)),
+            kpiCard('Alt Season Score', `${season.score}/100`, season.label, season.color),
+            kpiCard('Dominancia BTC', data.dominance == null ? '—' : data.dominance.toFixed(1) + '%', 'CoinGecko global', '#f59e0b'),
+            kpiCard('BTC 30d', data.btc ? fmtPct(data.btc.d30) : '—', data.btc ? `BTC 90d ${fmtPct(data.btc.d90)}` : 'Sin referencia', data.btc ? pctColor(data.btc.d30) : '#9ca3af')
+        ].join('');
+
+        document.getElementById('altbtc-chart').innerHTML = altChartSvg(data.idxSeries);
+
+        document.getElementById('altbtc-table').innerHTML = `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:11px;text-align:left;">
+            <thead><tr style="color:#9ca3af;border-bottom:1px solid #1f2937;">
+                <th style="padding:6px;">Par</th><th style="padding:6px;">Ratio</th><th style="padding:6px;">24h</th>
+                <th style="padding:6px;">7d</th><th style="padding:6px;">30d</th><th style="padding:6px;">90d</th>
+                <th style="padding:6px;">Curva 90d</th>
+            </tr></thead>
+            <tbody>${data.pairs.map((p) => `<tr style="border-bottom:1px solid #111827;">
+                <td style="padding:6px;font-weight:bold;color:#fff;">${esc(p.label)}<span style="color:#6b7280;font-weight:normal;">/BTC</span></td>
+                <td style="padding:6px;color:#d1d5db;">${fmtPrice(p.last)}</td>
+                <td style="padding:6px;color:${pctColor(p.d1)};">${fmtPct(p.d1)}</td>
+                <td style="padding:6px;color:${pctColor(p.d7)};">${fmtPct(p.d7)}</td>
+                <td style="padding:6px;color:${pctColor(p.d30)};">${fmtPct(p.d30)}</td>
+                <td style="padding:6px;color:${pctColor(p.d90)};">${fmtPct(p.d90)}</td>
+                <td style="padding:6px;">${miniSpark(p.closes, pctColor(p.d30))}</td>
+            </tr>`).join('')}</tbody>
+        </table></div>`;
+    }
+
+    // ------------------------------------------------------------------------
+    // PESTAÑA 3 · FUNDING & OPEN INTEREST
+    // ------------------------------------------------------------------------
+    function fundingTable(rows, positive) {
+        if (!rows.length) return '<div style="font-size:11px;color:#6b7280;padding:10px 0;">Sin datos.</div>';
+        return `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:11px;text-align:left;">
+            <thead><tr style="color:#9ca3af;border-bottom:1px solid #1f2937;">
+                <th style="padding:5px;">Par</th><th style="padding:5px;">Funding 8h</th><th style="padding:5px;">Anualizado</th><th style="padding:5px;">Mark</th>
+            </tr></thead>
+            <tbody>${rows.map((r) => {
+                const rate = Number(r.rate) * 100;
+                const annual = rate * 3 * 365;
+                const color = positive ? '#ef4444' : '#10b981';
+                return `<tr style="border-bottom:1px solid #111827;">
+                    <td style="padding:5px;font-weight:bold;color:#fff;">${esc(r.symbol.replace('USDT', ''))}</td>
+                    <td style="padding:5px;color:${color};font-weight:bold;">${rate >= 0 ? '+' : ''}${rate.toFixed(4)}%</td>
+                    <td style="padding:5px;color:${color};">${annual >= 0 ? '+' : ''}${annual.toFixed(1)}%</td>
+                    <td style="padding:5px;color:#9ca3af;">${fmtPrice(r.markPrice)}</td>
+                </tr>`;
+            }).join('')}</tbody>
+        </table></div>`;
+    }
+
+    async function loadFunding(force) {
+        if (state.fundingLoading) return;
+        if (state.fundingData && !force) {
+            renderFunding();
+            return;
+        }
+        state.fundingLoading = true;
+        setTabStatus('funding-status', 'loading', 'Descargando funding de Binance Futures y open interest de BTC…');
+
+        try {
+            const [premiumResult, oiResult] = await Promise.allSettled([
+                liqFetch('https://fapi.binance.com/fapi/v1/premiumIndex', 22000),
+                liqFetch('https://fapi.binance.com/futures/data/openInterestHist?symbol=BTCUSDT&period=1h&limit=25', 22000)
+            ]);
+
+            if (premiumResult.status !== 'fulfilled' || !Array.isArray(premiumResult.value)) {
+                throw new Error('Binance no devolvió el funding de futuros.');
+            }
+
+            const rows = premiumResult.value
+                .filter((r) => FUNDING_WHITELIST.has(String(r.symbol || '').toUpperCase()))
+                .map((r) => ({
+                    symbol: String(r.symbol).toUpperCase(),
+                    rate: Number(r.lastFundingRate),
+                    markPrice: Number(r.markPrice),
+                    nextFundingTime: Number(r.nextFundingTime)
+                }))
+                .filter((r) => Number.isFinite(r.rate));
+
+            if (!rows.length) throw new Error('Sin tasas de funding válidas.');
+
+            const sorted = [...rows].sort((a, b) => b.rate - a.rate);
+            const positive = sorted.slice(0, 8);
+            const negative = [...sorted].reverse().slice(0, 8).filter((r) => r.rate < 0);
+            const btc = rows.find((r) => r.symbol === 'BTCUSDT') || null;
+
+            let oi = null;
+            if (oiResult.status === 'fulfilled' && Array.isArray(oiResult.value) && oiResult.value.length > 1) {
+                const hist = oiResult.value;
+                const first = hist[0];
+                const last = hist[hist.length - 1];
+                const firstValue = Number(first.sumOpenInterestValue);
+                const lastValue = Number(last.sumOpenInterestValue);
+                if (Number.isFinite(firstValue) && Number.isFinite(lastValue) && firstValue > 0) {
+                    oi = {
+                        value: lastValue,
+                        change: ((lastValue / firstValue) - 1) * 100,
+                        points: hist.length
+                    };
+                }
+            }
+
+            state.fundingData = { rows, positive, negative, btc, oi, at: Date.now() };
+            renderFunding();
+            setTabStatus('funding-status', 'ok', `Funding de ${rows.length} pares líquidos y OI de BTC actualizados.`);
+        } catch (error) {
+            setTabStatus('funding-status', 'error', error.message || 'No se pudo cargar funding/OI.');
+            document.getElementById('funding-kpis').innerHTML = '';
+            document.getElementById('funding-long-table').innerHTML = '';
+            document.getElementById('funding-short-table').innerHTML = '';
+        } finally {
+            state.fundingLoading = false;
+        }
+    }
+
+    function renderFunding() {
+        const data = state.fundingData;
+        if (!data) return;
+        const btcRate = data.btc ? data.btc.rate * 100 : null;
+        const nextIn = data.btc && data.btc.nextFundingTime ? data.btc.nextFundingTime - Date.now() : null;
+        const nextText = nextIn == null ? '—' : (nextIn <= 0 ? 'ahora' : `${Math.floor(nextIn / 3600000)}h ${Math.floor((nextIn % 3600000) / 60000)}m`);
+        const avgTop = data.positive.length ? data.positive.reduce((acc, r) => acc + r.rate, 0) / data.positive.length * 100 : null;
+
+        document.getElementById('funding-kpis').innerHTML = [
+            kpiCard('Funding BTC 8h', btcRate == null ? '—' : (btcRate >= 0 ? '+' : '') + btcRate.toFixed(4) + '%', btcRate == null ? 'Sin dato' : (btcRate >= 0 ? 'Longs pagan a shorts' : 'Shorts pagan a longs'), btcRate == null ? '#9ca3af' : (btcRate >= 0 ? '#ef4444' : '#10b981')),
+            kpiCard('Próximo funding BTC', nextText, 'Cuenta atrás estimada', '#38bdf8'),
+            kpiCard('Open Interest BTC', data.oi ? fmtUSD(data.oi.value) : '—', data.oi ? `${data.oi.points} puntos horarios` : 'Sin histórico', '#f59e0b'),
+            kpiCard('OI BTC 24h', data.oi ? fmtPct(data.oi.change) : '—', data.oi ? (data.oi.change >= 0 ? 'Dinero entrando' : 'Dinero saliendo') : '—', data.oi ? pctColor(data.oi.change) : '#9ca3af'),
+            kpiCard('Funding medio top 8', avgTop == null ? '—' : (avgTop >= 0 ? '+' : '') + avgTop.toFixed(4) + '%', 'Presión media de longs', avgTop == null ? '#9ca3af' : (avgTop >= 0 ? '#ef4444' : '#10b981'))
+        ].join('');
+
+        document.getElementById('funding-long-table').innerHTML = fundingTable(data.positive, true);
+        document.getElementById('funding-short-table').innerHTML = fundingTable(data.negative, false);
+    }
+
+    // ------------------------------------------------------------------------
+    // API pública
+    // ------------------------------------------------------------------------
+    window.openLiquidacionesAltBtc = openModal;
+    window.quantLiquidaciones = {
+        open: openModal,
+        close: closeModal,
+        refresh: () => {
+            if (state.tab === 'liq') { stopWs(''); connectWs(); renderLiqDashboard(); }
+            else if (state.tab === 'altbtc') loadAltBtc(true);
+            else loadFunding(true);
+        },
+        reset: () => {
+            state.stats = emptyStats();
+            state.events = [];
+            renderLiqDashboard();
+        },
+        getStats: () => JSON.parse(JSON.stringify(state.stats))
+    };
+})();
