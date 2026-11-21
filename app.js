@@ -16606,6 +16606,7 @@
     const NOTES_KEY = 'crypto_panel7_golden_notes_v1';
     const PYRAMIDS_KEY = 'crypto_panel7_golden_pyramids_v1';
     const TREES_KEY = 'crypto_panel7_golden_trees_v1';
+    const SEMAPHORE_KEY = 'crypto_panel7_golden_semaphore_v1';
 
     const NOTE_TYPES = {
         ENTRADA: { color: '#10b981', bg: 'rgba(16,185,129,0.10)', label: 'ENTRADA' },
@@ -16756,23 +16757,26 @@
                     </div>
 
                     <div style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:12px;">
-                        <div style="font-size:13px;font-weight:bold;color:#f59e0b;margin-bottom:10px;">🚦 Semáforo de disciplina</div>
-                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                            <div style="font-size:13px;font-weight:bold;color:#f59e0b;">🚦 Semáforo de disciplina</div>
+                            <div id="p7-semaphore-count" style="font-size:10px;color:#6b7280;">0 reglas</div>
+                        </div>
+                        <div id="p7-semaphore" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
                             <div style="background:rgba(16,185,129,0.08);border:1px solid #10b981;border-radius:8px;padding:10px;">
                                 <div style="font-size:11.5px;font-weight:bold;color:#10b981;">✅ LUZ VERDE (Ejecutar)</div>
-                                <ul style="margin:8px 0 0 15px;padding:0;font-size:10.5px;color:#d1d5db;line-height:1.55;">
-                                    <li style="margin-bottom:4px;">BTC sobre EMA 50 diaria y macro sin pánico.</li>
-                                    <li style="margin-bottom:4px;">Precio en zona de valor (61.8–78.6%) con liquidez real.</li>
-                                    <li style="margin-bottom:4px;">SL por ATR definido y riesgo ≤ 2% del capital.</li>
-                                </ul>
+                                <ul id="p7-green-list" style="margin:8px 0 0 0;padding:0;list-style:none;font-size:10.5px;color:#d1d5db;line-height:1.55;"></ul>
+                                <div style="display:flex;gap:4px;margin-top:8px;">
+                                    <input id="p7-green-input" type="text" maxlength="180" placeholder="Añadir regla verde…" style="flex:1;min-width:70px;background:#0b0e14;border:1px solid #374151;color:#fff;padding:5px 7px;border-radius:5px;font-size:10px;" />
+                                    <button id="p7-green-add" type="button" title="Añadir regla verde" style="background:#10b981;color:#000;border:none;padding:5px 9px;border-radius:5px;font-size:10px;font-weight:bold;cursor:pointer;">➕</button>
+                                </div>
                             </div>
                             <div style="background:rgba(239,68,68,0.08);border:1px solid #ef4444;border-radius:8px;padding:10px;">
                                 <div style="font-size:11.5px;font-weight:bold;color:#ef4444;">🛑 LUZ ROJA (Prohibido Operar)</div>
-                                <ul style="margin:8px 0 0 15px;padding:0;font-size:10.5px;color:#d1d5db;line-height:1.55;">
-                                    <li style="margin-bottom:4px;">BTC rompiendo soporte o pánico macro en curso.</li>
-                                    <li style="margin-bottom:4px;">Vela verde +30% ya extendida: no perseguir.</li>
-                                    <li style="margin-bottom:4px;">Sin stop loss o apalancamiento mayor a 3x.</li>
-                                </ul>
+                                <ul id="p7-red-list" style="margin:8px 0 0 0;padding:0;list-style:none;font-size:10.5px;color:#d1d5db;line-height:1.55;"></ul>
+                                <div style="display:flex;gap:4px;margin-top:8px;">
+                                    <input id="p7-red-input" type="text" maxlength="180" placeholder="Añadir regla roja…" style="flex:1;min-width:70px;background:#0b0e14;border:1px solid #374151;color:#fff;padding:5px 7px;border-radius:5px;font-size:10px;" />
+                                    <button id="p7-red-add" type="button" title="Añadir regla roja" style="background:#ef4444;color:#fff;border:none;padding:5px 9px;border-radius:5px;font-size:10px;font-weight:bold;cursor:pointer;">➕</button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -17427,12 +17431,91 @@
     }
 
     // ------------------------------------------------------------------------
+    // SEMÁFORO DE DISCIPLINA ILIMITADO
+    // ------------------------------------------------------------------------
+    const DEFAULT_SEMAPHORE = {
+        green: [
+            'BTC sobre EMA 50 diaria y macro sin pánico.',
+            'Precio en zona de valor (61.8–78.6%) con liquidez real.',
+            'SL por ATR definido y riesgo ≤ 2% del capital.'
+        ],
+        red: [
+            'BTC rompiendo soporte o pánico macro en curso.',
+            'Vela verde +30% ya extendida: no perseguir.',
+            'Sin stop loss o apalancamiento mayor a 3x.'
+        ]
+    };
+
+    function readSemaphore() {
+        try {
+            const raw = localStorage.getItem(SEMAPHORE_KEY);
+            if (raw === null) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return null;
+            return {
+                green: Array.isArray(parsed.green) ? parsed.green.filter((t) => typeof t === 'string') : [],
+                red: Array.isArray(parsed.red) ? parsed.red.filter((t) => typeof t === 'string') : []
+            };
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function writeSemaphore(data) {
+        try { localStorage.setItem(SEMAPHORE_KEY, JSON.stringify(data)); } catch (error) { /* almacenamiento no disponible */ }
+    }
+
+    function getSemaphore() {
+        const stored = readSemaphore();
+        if (stored) return stored;
+        const seed = clone(DEFAULT_SEMAPHORE);
+        writeSemaphore(seed);
+        return seed;
+    }
+
+    function renderSemaphore() {
+        const data = getSemaphore();
+        [
+            { type: 'green', listId: 'p7-green-list' },
+            { type: 'red', listId: 'p7-red-list' }
+        ].forEach(({ type, listId }) => {
+            const list = document.getElementById(listId);
+            if (!list) return;
+            const rules = data[type];
+            list.innerHTML = rules.length
+                ? rules.map((text, index) => `<li style="display:flex;gap:6px;align-items:flex-start;padding:3px 0;border-bottom:1px solid #1f2937;">
+                    <span style="flex:1;word-break:break-word;">${esc(text)}</span>
+                    <button type="button" data-p7-sem-del="${type}" data-p7-sem-index="${index}" title="Borrar regla" aria-label="Borrar regla" style="background:transparent;color:#6b7280;border:none;font-size:9px;cursor:pointer;padding:0 2px;flex:0 0 auto;">✕</button>
+                </li>`).join('')
+                : '<li style="color:#6b7280;padding:3px 0;">Sin reglas. Añade la primera.</li>';
+        });
+        const count = document.getElementById('p7-semaphore-count');
+        if (count) count.textContent = `${data.green.length} verde · ${data.red.length} roja${data.red.length === 1 ? '' : 's'}`;
+    }
+
+    function addSemaphoreRule(type) {
+        const input = document.getElementById(type === 'green' ? 'p7-green-input' : 'p7-red-input');
+        if (!input) return;
+        const text = (input.value || '').trim();
+        if (!text) {
+            input.focus();
+            return;
+        }
+        const data = getSemaphore();
+        data[type].push(text);
+        writeSemaphore(data);
+        input.value = '';
+        renderSemaphore();
+    }
+
+    // ------------------------------------------------------------------------
     // Eventos generales
     // ------------------------------------------------------------------------
     function refreshPanelData() {
         renderPyramids();
         renderTrees();
         renderNotes();
+        renderSemaphore();
         showReminder(false, true);
     }
 
@@ -17461,9 +17544,32 @@
         });
     });
 
+    document.getElementById('p7-green-add').addEventListener('click', () => addSemaphoreRule('green'));
+    document.getElementById('p7-red-add').addEventListener('click', () => addSemaphoreRule('red'));
+    [['green', 'p7-green-input'], ['red', 'p7-red-input']].forEach(([type, id]) => {
+        document.getElementById(id).addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                addSemaphoreRule(type);
+            }
+        });
+    });
+    document.getElementById('p7-semaphore').addEventListener('click', (event) => {
+        const btn = event.target.closest('[data-p7-sem-del]');
+        if (!btn) return;
+        const type = btn.getAttribute('data-p7-sem-del');
+        const index = Number(btn.getAttribute('data-p7-sem-index'));
+        const data = getSemaphore();
+        if (!data[type]) return;
+        data[type].splice(index, 1);
+        writeSemaphore(data);
+        renderSemaphore();
+    });
+
     renderPyramids();
     renderTrees();
     renderNotes();
+    renderSemaphore();
     showReminder(false, true);
 
     // ------------------------------------------------------------------------
