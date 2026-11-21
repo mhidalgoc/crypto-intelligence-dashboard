@@ -16702,6 +16702,14 @@
                 <button id="p7-next-rule" type="button" style="background:#1f2937;color:#f59e0b;border:1px solid #f59e0b;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;white-space:nowrap;">Siguiente regla ↻</button>
             </div>
 
+            <div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+                <button id="p7-export" type="button" class="p7-mini-btn" title="Descargar un respaldo JSON de todo el Panel 07">⬇️ Exportar Panel 07</button>
+                <button id="p7-import-btn" type="button" class="p7-mini-btn" title="Cargar un respaldo JSON del Panel 07">⬆️ Importar respaldo</button>
+                <input id="p7-import-file" type="file" accept="application/json,.json" style="display:none;" />
+                <button id="p7-reset" type="button" class="p7-mini-btn is-danger" title="Volver al contenido predeterminado del código">♻️ Restaurar predeterminados</button>
+                <span id="p7-data-status" style="font-size:10px;color:#6b7280;"></span>
+            </div>
+
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:14px;align-items:start;">
                 <!-- COLUMNA IZQUIERDA · BIBLIOTECAS -->
                 <div>
@@ -17310,15 +17318,17 @@
         try { localStorage.setItem(NOTES_KEY, JSON.stringify(notes)); } catch (error) { /* almacenamiento no disponible */ }
     }
 
+    const DEFAULT_NOTES = [
+        { id: 'seed-entrada-1', type: 'ENTRADA', text: 'Comprar SOL solo en retroceso 61.8% con BTC estable sobre la EMA 50.' },
+        { id: 'seed-entrada-2', type: 'ENTRADA', text: 'No perseguir velas verdes: esperar el retroceso a la zona de valor.' },
+        { id: 'seed-salida-1', type: 'SALIDA', text: 'Vender 30% en el techo del rango y subir el SL a break-even.' },
+        { id: 'seed-salida-2', type: 'SALIDA', text: 'Tomar parciales en el primer objetivo y mover el stop a break-even.' },
+        { id: 'seed-psico-1', type: 'PSICOLOGIA', text: 'Si pierdo dos trades seguidos, cierro la pantalla una hora.' },
+        { id: 'seed-psico-2', type: 'PSICOLOGIA', text: 'Revisar BTC primero. Si el rey rompe soporte, no operar alts.' }
+    ];
+
     function seedNotes() {
-        const seed = [
-            { id: 'seed-entrada-1', type: 'ENTRADA', text: 'Comprar SOL solo en retroceso 61.8% con BTC estable sobre la EMA 50.' },
-            { id: 'seed-entrada-2', type: 'ENTRADA', text: 'No perseguir velas verdes: esperar el retroceso a la zona de valor.' },
-            { id: 'seed-salida-1', type: 'SALIDA', text: 'Vender 30% en el techo del rango y subir el SL a break-even.' },
-            { id: 'seed-salida-2', type: 'SALIDA', text: 'Tomar parciales en el primer objetivo y mover el stop a break-even.' },
-            { id: 'seed-psico-1', type: 'PSICOLOGIA', text: 'Si pierdo dos trades seguidos, cierro la pantalla una hora.' },
-            { id: 'seed-psico-2', type: 'PSICOLOGIA', text: 'Revisar BTC primero. Si el rey rompe soporte, no operar alts.' }
-        ];
+        const seed = clone(DEFAULT_NOTES);
         writeNotes(seed);
         return seed;
     }
@@ -17509,6 +17519,162 @@
     }
 
     // ------------------------------------------------------------------------
+    // RESPALDO: EXPORTAR / IMPORTAR / RESTAURAR PREDETERMINADOS
+    // ------------------------------------------------------------------------
+    function collectSnapshot() {
+        return {
+            app: 'crypto-intelligence-dashboard',
+            panel: 'panel-golden-rules',
+            version: 1,
+            exportedAt: new Date().toISOString(),
+            data: {
+                notes: getNotes(),
+                pyramids,
+                trees,
+                semaphore: getSemaphore()
+            }
+        };
+    }
+
+    function normalizeSnapshot(raw) {
+        const data = raw && raw.data ? raw.data : raw;
+        if (!data || typeof data !== 'object') throw new Error('El archivo no contiene datos del Panel 07.');
+
+        const notes = (Array.isArray(data.notes) ? data.notes : [])
+            .filter((note) => note && typeof note.text === 'string' && note.text.trim())
+            .map((note) => ({
+                id: typeof note.id === 'string' && note.id ? note.id : uid('note'),
+                type: NOTE_TYPES[note.type] ? note.type : 'PSICOLOGIA',
+                text: note.text.trim().slice(0, 300)
+            }));
+
+        const pyramidsOut = (Array.isArray(data.pyramids) ? data.pyramids : [])
+            .filter((p) => p && Array.isArray(p.floors) && p.floors.length)
+            .map((p) => ({
+                id: typeof p.id === 'string' && p.id ? p.id : uid('pyramid'),
+                name: String(p.name || 'Pirámide importada').slice(0, 90),
+                floors: p.floors.map((floor, index) => ({
+                    percent: String((floor && floor.percent) || '').slice(0, 26),
+                    label: String((floor && floor.label) || FLOOR_NAMES[index] || 'Piso').slice(0, 60),
+                    assets: String((floor && floor.assets) || '').slice(0, 300),
+                    rule: String((floor && floor.rule) || '').slice(0, 700)
+                }))
+            }));
+        if (!pyramidsOut.length) throw new Error('El respaldo no contiene pirámides válidas.');
+
+        const treesOut = (Array.isArray(data.trees) ? data.trees : [])
+            .filter((t) => t && Array.isArray(t.levels) && t.levels.length)
+            .map((t) => ({
+                id: typeof t.id === 'string' && t.id ? t.id : uid('tree'),
+                name: String(t.name || 'Árbol importado').slice(0, 90),
+                levels: t.levels.map((level, index) => ({
+                    title: String((level && level.title) || `Nivel ${index + 1}`).slice(0, 140),
+                    body: String((level && level.body) || '').slice(0, 700)
+                }))
+            }));
+        if (!treesOut.length) throw new Error('El respaldo no contiene árboles válidos.');
+
+        const sem = (data.semaphore && typeof data.semaphore === 'object') ? data.semaphore : {};
+        const green = (Array.isArray(sem.green) ? sem.green : [])
+            .filter((t) => typeof t === 'string' && t.trim()).map((t) => t.trim().slice(0, 220));
+        const red = (Array.isArray(sem.red) ? sem.red : [])
+            .filter((t) => typeof t === 'string' && t.trim()).map((t) => t.trim().slice(0, 220));
+
+        return { notes, pyramids: pyramidsOut, trees: treesOut, semaphore: { green, red } };
+    }
+
+    function exportPanelData() {
+        try {
+            const blob = new Blob([JSON.stringify(collectSnapshot(), null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            const d = new Date();
+            const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+            anchor.href = url;
+            anchor.download = `panel7-reglas-de-oro-${stamp}.json`;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+            setStatus('p7-data-status', 'Respaldo descargado.', '#10b981');
+            return true;
+        } catch (error) {
+            setStatus('p7-data-status', `⚠️ No se pudo exportar: ${error.message}`, '#ef4444');
+            return false;
+        }
+    }
+
+    function applySnapshot(raw, skipConfirm) {
+        let normalized;
+        try {
+            normalized = normalizeSnapshot(raw);
+        } catch (error) {
+            setStatus('p7-data-status', `⚠️ ${error.message}`, '#ef4444');
+            return false;
+        }
+        if (!skipConfirm) {
+            const total = `${normalized.pyramids.length} pirámide(s), ${normalized.trees.length} árbol(es), ${normalized.notes.length} recordatorio(s) y ${normalized.semaphore.green.length + normalized.semaphore.red.length} regla(s) del semáforo`;
+            if (!window.confirm(`Importar ${total}. Se reemplazará el contenido actual de este navegador. ¿Continuar?`)) return false;
+        }
+        writeNotes(normalized.notes);
+        writeList(PYRAMIDS_KEY, normalized.pyramids);
+        writeList(TREES_KEY, normalized.trees);
+        writeSemaphore(normalized.semaphore);
+        pyramids = getPyramids();
+        trees = getTrees();
+        pyramidFloorState.clear();
+        activeFilter = 'ALL';
+        reminderIndex = 0;
+        refreshPanelData();
+        setStatus('p7-data-status', 'Respaldo importado correctamente.', '#10b981');
+        return true;
+    }
+
+    function restoreDefaults(force) {
+        if (!force) {
+            const ok = window.confirm('Se borrarán tus pirámides, árboles, recordatorios y reglas del semáforo de este navegador y se cargarán los predeterminados del código. ¿Continuar?');
+            if (!ok) return false;
+        }
+        writeNotes(clone(DEFAULT_NOTES));
+        writeList(PYRAMIDS_KEY, [clone(DEFAULT_PYRAMID)]);
+        writeList(TREES_KEY, [clone(DEFAULT_TREE)]);
+        writeSemaphore(clone(DEFAULT_SEMAPHORE));
+        pyramids = getPyramids();
+        trees = getTrees();
+        pyramidFloorState.clear();
+        activeFilter = 'ALL';
+        reminderIndex = 0;
+        refreshPanelData();
+        setStatus('p7-data-status', 'Contenido restaurado a los predeterminados.', '#10b981');
+        return true;
+    }
+
+    async function handleImportFile(event) {
+        const file = event.target.files && event.target.files[0];
+        event.target.value = '';
+        if (!file) return;
+        try {
+            const text = await file.text();
+            const raw = JSON.parse(text);
+            const normalized = normalizeSnapshot(raw);
+            const total = `${normalized.pyramids.length} pirámide(s), ${normalized.trees.length} árbol(es), ${normalized.notes.length} recordatorio(s) y ${normalized.semaphore.green.length + normalized.semaphore.red.length} regla(s) del semáforo`;
+            if (!window.confirm(`Importar ${total}. Se reemplazará el contenido actual de este navegador. ¿Continuar?`)) return;
+            applySnapshot(raw, true);
+        } catch (error) {
+            setStatus('p7-data-status', `⚠️ ${error.message}`, '#ef4444');
+        }
+    }
+
+    // API pública para respaldos y futuras integraciones.
+    window.Panel7Data = Object.freeze({
+        snapshot: collectSnapshot,
+        export: exportPanelData,
+        import: (raw) => applySnapshot(raw, true),
+        reset: () => restoreDefaults(true),
+        keys: { notes: NOTES_KEY, pyramids: PYRAMIDS_KEY, trees: TREES_KEY, semaphore: SEMAPHORE_KEY }
+    });
+
+    // ------------------------------------------------------------------------
     // Eventos generales
     // ------------------------------------------------------------------------
     function refreshPanelData() {
@@ -17565,6 +17731,11 @@
         writeSemaphore(data);
         renderSemaphore();
     });
+
+    document.getElementById('p7-export').addEventListener('click', exportPanelData);
+    document.getElementById('p7-import-btn').addEventListener('click', () => document.getElementById('p7-import-file').click());
+    document.getElementById('p7-import-file').addEventListener('change', handleImportFile);
+    document.getElementById('p7-reset').addEventListener('click', () => restoreDefaults(false));
 
     renderPyramids();
     renderTrees();
