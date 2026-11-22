@@ -18004,6 +18004,11 @@
         #p7m-notes-list { scrollbar-width: thin; }
         #p7m-notes-list::-webkit-scrollbar { width: 6px; }
         #p7m-notes-list::-webkit-scrollbar-thumb { background: #374151; border-radius: 99px; }
+        .p7m-tab { background:#151924;color:#d1d5db;border:1px solid #374151;padding:8px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap; }
+        .p7m-tab:hover { filter:brightness(1.15); }
+        .p7m-tab.is-active { background:#f59e0b;color:#000;border-color:#f59e0b; }
+        #p7c-chart svg { display:block;width:100%;height:auto; }
+        #p7c-cbbi-input::-webkit-outer-spin-button, #p7c-cbbi-input::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
     `;
     document.head.appendChild(style);
 
@@ -18030,6 +18035,12 @@
             <button id="p7m-close" type="button" style="background:#1f2937;color:#9ca3af;border:none;padding:7px 12px;border-radius:6px;cursor:pointer;font-weight:bold;">✕ Cerrar</button>
         </div>
 
+        <div id="p7m-tabbar" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+            <button type="button" class="p7m-tab is-active" data-p7m-tab="1">🧠 Reglas de Oro, Pirámide y Notas</button>
+            <button type="button" class="p7m-tab" data-p7m-tab="2">🧭 Radar Psicológico de Ciclo (Wall St. Cheat Sheet)</button>
+        </div>
+
+        <div id="p7m-pane-1">
         <!-- BANNER ROTATIVO -->
         <div style="background:linear-gradient(90deg,#151924,#111827);border:1px solid #f59e0b;border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
             <div style="flex:1;min-width:240px;">
@@ -18125,6 +18136,50 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+        </div><!-- /p7m-pane-1 -->
+
+        <div id="p7m-pane-2" style="display:none;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                <div>
+                    <div style="font-size:15px;font-weight:bold;color:#f59e0b;">🧭 Radar Psicológico de Ciclo</div>
+                    <div style="font-size:10.5px;color:#9ca3af;">Wall St. Cheat Sheet en vivo · 13 fases · datos gratuitos sin CORS</div>
+                </div>
+                <button id="p7c-refresh" type="button" style="background:#1f2937;color:#f59e0b;border:1px solid #f59e0b;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:bold;white-space:nowrap;">🔄 Recalcular Ciclo</button>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-bottom:8px;">
+                <label style="font-size:9.5px;color:#9ca3af;display:block;background:#111827;border:1px solid #1f2937;border-radius:7px;padding:8px;">CBBI manual (0–100) <span style="color:#6b7280;">opcional</span>
+                    <input id="p7c-cbbi-input" type="number" min="0" max="100" step="1" placeholder="Auto (sintético)" style="width:100%;margin-top:4px;background:#0b0e14;border:1px solid #374151;color:#fff;padding:6px 8px;border-radius:5px;font-size:11px;" />
+                </label>
+                <label style="font-size:9.5px;color:#9ca3af;display:block;background:#111827;border:1px solid #1f2937;border-radius:7px;padding:8px;">Pulso social en X
+                    <select id="p7c-x-pulse-select" style="width:100%;margin-top:4px;background:#0b0e14;border:1px solid #374151;color:#fff;padding:6px 8px;border-radius:5px;font-size:11px;cursor:pointer;">
+                        <option value="10">☠️ Pánico masivo / "Cripto ha muerto"</option>
+                        <option value="30">😒 Desinterés / Silencio / Burla a los alcistas</option>
+                        <option value="50" selected>⚖️ Neutral / Debate equilibrado</option>
+                        <option value="75">🔥 Optimismo fuerte / Hilos de "altseason"</option>
+                        <option value="95">🚀 Euforia extrema / Presumiendo ganancias y apalancamiento</option>
+                    </select>
+                </label>
+                <div style="background:#111827;border:1px solid #1f2937;border-radius:7px;padding:8px;">
+                    <div style="font-size:9.5px;color:#9ca3af;">Score compuesto del ciclo</div>
+                    <div id="p7c-score-badge" style="font-size:20px;font-weight:bold;color:#9ca3af;line-height:1.2;margin-top:2px;">—</div>
+                    <div id="p7c-direction" style="font-size:9.5px;color:#6b7280;">Sin datos todavía</div>
+                </div>
+            </div>
+
+            <div id="p7c-status" style="font-size:10px;color:#6b7280;margin-bottom:8px;">Pulsa «Recalcular Ciclo» para consultar Fear &amp; Greed, BTC, derivados y pulso social.</div>
+
+            <div style="background:#090d16;border:1px solid #1f2937;border-radius:10px;padding:4px;margin-bottom:10px;">
+                <div id="p7c-chart"></div>
+            </div>
+
+            <div id="p7c-metrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px;"></div>
+            <div id="p7c-verdict"></div>
+
+            <div style="font-size:9.5px;color:#6b7280;line-height:1.5;margin-top:8px;">
+                Metodología: Fear &amp; Greed 35% + CBBI/Mayer 30% + Funding y L/S 20% + Pulso social X 15%. Si una fuente falla, el score se repondera con las disponibles. El CBBI manual sustituye al sintético.
             </div>
         </div>
 
@@ -18382,6 +18437,432 @@
     }
 
     // ------------------------------------------------------------------------
+    // RADAR PSICOLÓGICO DE CICLO · PESTAÑA 2
+    // ------------------------------------------------------------------------
+    const SOCIAL_KEY = 'crypto_panel7_x_pulse_v1';
+    const CBBI_KEY = 'crypto_panel7_cbbi_manual_v1';
+
+    const PHASES = {
+        Disbelief: { side: 'expansion', range: '0–20', quote: 'This rally will fail like the others', x: 90, y: 340 },
+        Hope: { side: 'expansion', range: '21–35', quote: 'A recovery is possible', x: 155, y: 308 },
+        Optimism: { side: 'expansion', range: '36–52', quote: 'This rally is real', x: 220, y: 268 },
+        Belief: { side: 'expansion', range: '53–68', quote: 'Time to get fully invested', x: 285, y: 218 },
+        Thrill: { side: 'expansion', range: '69–83', quote: 'I will buy more on margin. Gotta tell everyone to buy!', x: 350, y: 155 },
+        Euphoria: { side: 'expansion', range: '84–100', quote: "I am a genius! We're all going to be rich!", x: 450, y: 85 },
+        Complacency: { side: 'contraction', range: '75–100', quote: 'We just need to cool off for the next rally', x: 535, y: 125 },
+        Anxiety: { side: 'contraction', range: '60–74', quote: 'Why am I getting margin calls? This dip is taking longer', x: 590, y: 185 },
+        Denial: { side: 'contraction', range: '45–59', quote: 'My investments are with great companies. They will come back', x: 635, y: 235 },
+        Panic: { side: 'contraction', range: '30–44', quote: 'Everyone is selling. I need to get out!', x: 680, y: 285 },
+        Capitulation: { side: 'contraction', range: '18–29', quote: "I'm getting 100% out of the markets", x: 725, y: 325 },
+        Anger: { side: 'contraction', range: '9–17', quote: 'Who shorted the market?!', x: 775, y: 348 },
+        Depression: { side: 'contraction', range: '0–8', quote: 'My money is lost. I am an idiot', x: 835, y: 360 }
+    };
+    const PHASE_ORDER = ['Disbelief', 'Hope', 'Optimism', 'Belief', 'Thrill', 'Euphoria', 'Complacency', 'Anxiety', 'Denial', 'Panic', 'Capitulation', 'Anger', 'Depression'];
+
+    const radar = {
+        fng: null,
+        btc: null,
+        deriv: null,
+        social: 50,
+        manualCbbi: null,
+        loading: false,
+        lastFetch: 0
+    };
+
+    try {
+        const storedSocial = Number(localStorage.getItem(SOCIAL_KEY));
+        if ([10, 30, 50, 75, 95].includes(storedSocial)) radar.social = storedSocial;
+        const storedCbbi = localStorage.getItem(CBBI_KEY);
+        if (storedCbbi !== null && storedCbbi !== '') {
+            const manual = Number(storedCbbi);
+            if (Number.isFinite(manual) && manual >= 0 && manual <= 100) radar.manualCbbi = manual;
+        }
+    } catch (error) { /* almacenamiento no disponible */ }
+
+    const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+    const avg = (list) => list.reduce((a, b) => a + b, 0) / list.length;
+
+    async function radarFetchJson(url, timeoutMs = 15000) {
+        const targets = [url];
+        try {
+            const proxied = typeof window.QuantLocalProxy === 'function' ? window.QuantLocalProxy(url) : null;
+            if (proxied) targets.push(proxied);
+        } catch (error) { /* sin proxy */ }
+        targets.push('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
+        let lastError = null;
+        for (const target of targets) {
+            const controller = new AbortController();
+            const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const response = await fetch(target, { cache: 'no-store', credentials: 'omit', signal: controller.signal });
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                return await response.json();
+            } catch (error) {
+                lastError = error;
+            } finally {
+                window.clearTimeout(timer);
+            }
+        }
+        throw lastError || new Error('Sin respuesta');
+    }
+
+    async function fetchFearGreed() {
+        const data = await radarFetchJson('https://api.alternative.me/fng/?limit=2', 12000);
+        const rows = data && Array.isArray(data.data) ? data.data : [];
+        if (!rows.length) throw new Error('Fear & Greed sin datos');
+        const current = Number(rows[0].value);
+        if (!Number.isFinite(current)) throw new Error('Fear & Greed inválido');
+        return {
+            value: current,
+            classification: String(rows[0].value_classification || ''),
+            previous: rows[1] ? Number(rows[1].value) : null
+        };
+    }
+
+    async function fetchBtcStructure() {
+        const rows = await radarFetchJson('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=210', 15000);
+        if (!Array.isArray(rows) || rows.length < 200) throw new Error('Velas BTC insuficientes');
+        const closes = rows.map((row) => Number(row[4])).filter(Number.isFinite);
+        const highs = rows.map((row) => Number(row[2])).filter(Number.isFinite);
+        if (closes.length < 200) throw new Error('Cierres BTC insuficientes');
+        const price = closes[closes.length - 1];
+        const high210 = Math.max(...highs);
+        const sma50 = avg(closes.slice(-50));
+        const sma200 = avg(closes.slice(-200));
+        const mayer = sma200 > 0 ? price / sma200 : null;
+        const drawdown = high210 > 0 ? ((high210 - price) / high210) * 100 : 0;
+        const mayerScore = mayer == null ? 50 : clamp(((mayer - 0.8) / (2.4 - 0.8)) * 100, 0, 100);
+        const proximityScore = clamp(100 - drawdown * 2.5, 0, 100);
+        const cbbi = clamp(mayerScore * 0.6 + proximityScore * 0.4, 0, 100);
+        const expansion = price >= sma50 || drawdown < 15;
+        return { price, high210, sma50, sma200, mayer, drawdown, cbbi, expansion };
+    }
+
+    async function fetchDerivatives() {
+        const [premium, ratioData] = await Promise.all([
+            radarFetchJson('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT', 12000),
+            radarFetchJson('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=1d&limit=2', 12000)
+        ]);
+        const funding = Number(premium && premium.lastFundingRate);
+        if (!Number.isFinite(funding)) throw new Error('Funding inválido');
+        const fundingPct = funding * 100;
+        const rows = Array.isArray(ratioData) ? ratioData : [];
+        const latest = rows.length ? rows[rows.length - 1] : null;
+        const lsRatio = latest ? Number(latest.longShortRatio) : null;
+        const fundingScore = clamp(50 + (fundingPct / 0.05) * 50, 0, 100);
+        const lsScore = Number.isFinite(lsRatio) ? clamp(((lsRatio - 0.5) / 1.5) * 100, 0, 100) : 50;
+        const score = Number.isFinite(lsRatio) ? fundingScore * 0.6 + lsScore * 0.4 : fundingScore;
+        return { funding, fundingPct, lsRatio, score: clamp(score, 0, 100) };
+    }
+
+    async function loadRadar(force) {
+        if (radar.loading) return;
+        if (!force && radar.btc && (Date.now() - radar.lastFetch) < 90000) {
+            renderRadar();
+            return;
+        }
+        radar.loading = true;
+        const button = document.getElementById('p7c-refresh');
+        const status = document.getElementById('p7c-status');
+        if (button) { button.disabled = true; button.textContent = '⏳ Calculando…'; }
+        if (status) { status.textContent = 'Consultando Fear & Greed, estructura BTC y derivados…'; status.style.color = '#f59e0b'; }
+
+        const results = await Promise.allSettled([fetchFearGreed(), fetchBtcStructure(), fetchDerivatives()]);
+        radar.fng = results[0].status === 'fulfilled' ? results[0].value : null;
+        radar.btc = results[1].status === 'fulfilled' ? results[1].value : null;
+        radar.deriv = results[2].status === 'fulfilled' ? results[2].value : null;
+        radar.lastFetch = Date.now();
+        radar.loading = false;
+
+        if (button) { button.disabled = false; button.textContent = '🔄 Recalcular Ciclo'; }
+        const ok = [radar.fng, radar.btc, radar.deriv].filter(Boolean).length;
+        if (status) {
+            const time = new Date().toLocaleTimeString('es-ES', { hour12: false });
+            const failures = [
+                !radar.fng ? 'F&G' : null,
+                !radar.btc ? 'BTC' : null,
+                !radar.deriv ? 'Derivados' : null
+            ].filter(Boolean);
+            status.innerHTML = ok === 3
+                ? `<span style="color:#10b981;">✅ 3/3 fuentes en vivo · ${time}</span>`
+                : `<span style="color:#f59e0b;">⚠️ ${ok}/3 fuentes · falló: ${failures.join(', ')} · ${time}</span>`;
+        }
+        renderRadar();
+    }
+
+    function cbbiState() {
+        if (radar.manualCbbi != null) return { value: radar.manualCbbi, manual: true };
+        if (radar.btc) return { value: radar.btc.cbbi, manual: false };
+        return { value: null, manual: false };
+    }
+
+    function compositeScore() {
+        const cbbi = cbbiState();
+        const sources = [
+            { weight: 0.35, value: radar.fng ? radar.fng.value : null },
+            { weight: 0.30, value: cbbi.value },
+            { weight: 0.20, value: radar.deriv ? radar.deriv.score : null },
+            { weight: 0.15, value: radar.social }
+        ];
+        const active = sources.filter((item) => Number.isFinite(item.value));
+        const totalWeight = active.reduce((sum, item) => sum + item.weight, 0);
+        if (!totalWeight) return null;
+        return Math.round(active.reduce((sum, item) => sum + item.value * item.weight, 0) / totalWeight);
+    }
+
+    function detectPhase(score, expansion) {
+        if (expansion) {
+            if (score <= 20) return 'Disbelief';
+            if (score <= 35) return 'Hope';
+            if (score <= 52) return 'Optimism';
+            if (score <= 68) return 'Belief';
+            if (score <= 83) return 'Thrill';
+            return 'Euphoria';
+        }
+        if (score >= 75) return 'Complacency';
+        if (score >= 60) return 'Anxiety';
+        if (score >= 45) return 'Denial';
+        if (score >= 30) return 'Panic';
+        if (score >= 18) return 'Capitulation';
+        if (score >= 9) return 'Anger';
+        return 'Depression';
+    }
+
+    function smoothPath(points) {
+        if (points.length < 2) return '';
+        let d = `M ${points[0].x} ${points[0].y}`;
+        for (let i = 0; i < points.length - 1; i += 1) {
+            const p0 = points[i - 1] || points[i];
+            const p1 = points[i];
+            const p2 = points[i + 1];
+            const p3 = points[i + 2] || p2;
+            const cp1x = p1.x + (p2.x - p0.x) / 6;
+            const cp1y = p1.y + (p2.y - p0.y) / 6;
+            const cp2x = p2.x - (p3.x - p1.x) / 6;
+            const cp2y = p2.y - (p3.y - p1.y) / 6;
+            d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x} ${p2.y}`;
+        }
+        return d;
+    }
+
+    function buildCycleSvg(phaseName) {
+        const points = PHASE_ORDER.map((name) => ({ name, ...PHASES[name] }));
+        const pathPoints = [{ x: 55, y: 358 }, ...points, { x: 880, y: 342 }];
+        const path = smoothPath(pathPoints);
+        const area = `${path} L 880 400 L 55 400 Z`;
+        const marker = PHASES[phaseName] || PHASES.Hope;
+
+        const labels = points.map((point, index) => {
+            const lift = index % 2 === 0 ? 20 : 32;
+            return `<circle cx="${point.x}" cy="${point.y}" r="3" fill="#9ca3af"/>
+                <text x="${point.x}" y="${point.y - lift}" text-anchor="middle" fill="#e5e7eb" font-size="9" font-weight="bold" font-family="sans-serif">${esc(point.name)}</text>
+                <text x="${point.x}" y="${point.y - lift + 10}" text-anchor="middle" fill="#6b7280" font-size="7.5" font-family="sans-serif">${point.range}</text>`;
+        }).join('');
+
+        return `<svg viewBox="0 0 900 420" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Curva del ciclo psicológico del mercado">
+            <defs>
+                <linearGradient id="p7cLine" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stop-color="#10b981"/>
+                    <stop offset="45%" stop-color="#f59e0b"/>
+                    <stop offset="70%" stop-color="#ef4444"/>
+                    <stop offset="100%" stop-color="#a855f7"/>
+                </linearGradient>
+                <linearGradient id="p7cArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.14"/>
+                    <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
+                </linearGradient>
+            </defs>
+            <rect width="900" height="420" fill="#090d16"/>
+            ${[80, 160, 240, 320].map((y) => `<line x1="20" y1="${y}" x2="880" y2="${y}" stroke="#1f2937" stroke-width="0.6" opacity="0.55"/>`).join('')}
+            <path d="${area}" fill="url(#p7cArea)"/>
+            <path d="${path}" fill="none" stroke="url(#p7cLine)" stroke-width="3" stroke-linecap="round"/>
+            <line x1="450" y1="52" x2="450" y2="390" stroke="#ef4444" stroke-width="1" stroke-dasharray="4 4" opacity="0.35"/>
+            <text x="450" y="46" text-anchor="middle" fill="#ef4444" font-size="9" font-weight="bold" font-family="sans-serif">MÁXIMO RIESGO FINANCIERO</text>
+            <text x="832" y="400" text-anchor="middle" fill="#10b981" font-size="9" font-weight="bold" font-family="sans-serif">MÁXIMA OPORTUNIDAD</text>
+            ${labels}
+            <g transform="translate(${marker.x},${marker.y})">
+                <circle r="8" fill="none" stroke="#f59e0b" stroke-width="2">
+                    <animate attributeName="r" values="7;24" dur="1.9s" repeatCount="indefinite"/>
+                    <animate attributeName="opacity" values="0.85;0" dur="1.9s" repeatCount="indefinite"/>
+                </circle>
+                <circle r="6.5" fill="#f59e0b" stroke="#0b0e14" stroke-width="2"/>
+                <g transform="translate(0,-46)">
+                    <rect x="-60" y="-14" width="120" height="21" rx="5" fill="#0b0e14" stroke="#f59e0b" stroke-width="1"/>
+                    <text x="0" y="0" text-anchor="middle" fill="#f59e0b" font-size="10" font-weight="bold" font-family="sans-serif">📍 ESTÁS AQUÍ</text>
+                </g>
+            </g>
+        </svg>`;
+    }
+
+    function metricCard(label, value, sub, color) {
+        return `<div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:9px;">
+            <div style="font-size:8.5px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;">${esc(label)}</div>
+            <div style="font-size:16px;font-weight:bold;color:${color};line-height:1.2;margin-top:2px;">${value}</div>
+            <div style="font-size:9px;color:#9ca3af;margin-top:2px;line-height:1.35;">${sub}</div>
+        </div>`;
+    }
+
+    function fngColor(value) {
+        if (value == null) return '#6b7280';
+        if (value <= 24) return '#ef4444';
+        if (value <= 49) return '#f59e0b';
+        if (value <= 74) return '#10b981';
+        return '#f43f5e';
+    }
+
+    function socialMeta(value) {
+        const map = {
+            10: '☠️ Pánico masivo / "Cripto ha muerto"',
+            30: '😒 Desinterés / Silencio / Burla a los alcistas',
+            50: '⚖️ Neutral / Debate equilibrado',
+            75: '🔥 Optimismo fuerte / Hilos de "altseason"',
+            95: '🚀 Euforia extrema / Presumiendo ganancias y apalancamiento'
+        };
+        return map[value] || map[50];
+    }
+
+    function verdictFor(phaseName) {
+        if (phaseName === 'Euphoria') {
+            return { color: '#ef4444', title: 'Punto de máximo riesgo financiero', body: 'Euforia extrema: toma ganancias, no te apalanques y protege el capital. El mercado no regala dinero en esta fase.' };
+        }
+        if (phaseName === 'Thrill') {
+            return { color: '#f59e0b', title: 'Riesgo creciente', body: 'Reduce tamaño, sube stops y evita comprar por FOMO. La fiesta sigue, pero la salida se estrecha.' };
+        }
+        if (phaseName === 'Depression' || phaseName === 'Capitulation') {
+            return { color: '#10b981', title: 'Punto de máxima oportunidad financiera', body: 'Acumula con DCA y paciencia. El precio está en descuento; el tiempo es tu mejor multiplicador.' };
+        }
+        if (phaseName === 'Anger' || phaseName === 'Panic') {
+            return { color: '#10b981', title: 'Cerca de la oportunidad', body: 'Empieza a escalonar sin apalancamiento. Puede haber más volatilidad, pero el riesgo/beneficio mejora.' };
+        }
+        return { color: '#f59e0b', title: 'Fase intermedia', body: 'Respeta el árbol de validación, el plan de asignación y el tamaño de posición.' };
+    }
+
+    function renderRadar() {
+        const score = compositeScore();
+        const hasData = Boolean(radar.fng || radar.btc || radar.deriv);
+        const chart = document.getElementById('p7c-chart');
+        const metrics = document.getElementById('p7c-metrics');
+        const verdictEl = document.getElementById('p7c-verdict');
+        const badge = document.getElementById('p7c-score-badge');
+        const direction = document.getElementById('p7c-direction');
+
+        if (!hasData || score == null) {
+            if (chart) chart.innerHTML = '<div style="padding:40px 16px;text-align:center;color:#6b7280;font-size:11px;">Pulsa «Recalcular Ciclo» para construir el mapa psicológico con datos en vivo.</div>';
+            if (metrics) metrics.innerHTML = '';
+            if (verdictEl) verdictEl.innerHTML = '';
+            if (badge) { badge.textContent = '—'; badge.style.color = '#6b7280'; }
+            if (direction) direction.textContent = 'Sin datos todavía';
+            return;
+        }
+
+        const expansion = radar.btc ? radar.btc.expansion : score >= 50;
+        const phaseName = detectPhase(score, expansion);
+        const phase = PHASES[phaseName];
+        const cbbi = cbbiState();
+        const verdict = verdictFor(phaseName);
+
+        if (chart) chart.innerHTML = buildCycleSvg(phaseName);
+
+        if (badge) {
+            badge.textContent = `${score}/100`;
+            badge.style.color = phaseName === 'Euphoria' || phaseName === 'Thrill' ? '#ef4444' : (phaseName === 'Depression' || phaseName === 'Capitulation' ? '#10b981' : '#f59e0b');
+        }
+        if (direction) {
+            direction.innerHTML = radar.btc
+                ? `<span style="color:${radar.btc.expansion ? '#10b981' : '#ef4444'};">${radar.btc.expansion ? 'Lado Izquierdo · Expansión' : 'Lado Derecho · Contracción'}</span> · ${radar.btc.drawdown.toFixed(1)}% desde máximo 210d`
+                : '<span style="color:#f59e0b;">Dirección estimada por score</span>';
+        }
+
+        if (metrics) {
+            const fng = radar.fng;
+            const fngSub = fng
+                ? `${fng.classification || '—'}${Number.isFinite(fng.previous) ? ` · ayer ${fng.previous}` : ''}`
+                : 'Sin datos';
+            const cbbiSub = cbbi.value == null
+                ? 'Sin datos'
+                : `${cbbi.manual ? 'Manual' : 'Sintético'}${radar.btc ? ` · Mayer ${radar.btc.mayer.toFixed(2)}` : ''}`;
+            const deriv = radar.deriv;
+            const derivLabel = deriv
+                ? (deriv.score >= 70 ? 'Sobreapalancamiento alcista' : (deriv.score <= 30 ? 'Capitulación de longs' : 'Equilibrio'))
+                : 'Sin datos';
+            const derivValue = deriv ? `${deriv.fundingPct >= 0 ? '+' : ''}${deriv.fundingPct.toFixed(4)}%` : 'N/D';
+            const derivSub = deriv
+                ? `${Number.isFinite(deriv.lsRatio) ? `L/S ${deriv.lsRatio.toFixed(2)} · ` : ''}${derivLabel}`
+                : 'Sin datos';
+
+            metrics.innerHTML = [
+                metricCard('Fear & Greed', fng ? fng.value : 'N/D', fngSub, fngColor(fng ? fng.value : null)),
+                metricCard('CBBI / Mayer', cbbi.value == null ? 'N/D' : Math.round(cbbi.value), `${cbbiSub}${radar.btc ? ` · BTC $${Math.round(radar.btc.price).toLocaleString('en-US')}` : ''}`, '#f59e0b'),
+                metricCard('Funding & L/S', derivValue, derivSub, deriv && deriv.score >= 70 ? '#ef4444' : (deriv && deriv.score <= 30 ? '#10b981' : '#9ca3af')),
+                metricCard('Pulso social X', radar.social, socialMeta(radar.social), radar.social >= 75 ? '#ef4444' : (radar.social <= 30 ? '#10b981' : '#9ca3af'))
+            ].join('');
+        }
+
+        if (verdictEl) {
+            verdictEl.innerHTML = `<div style="background:${verdict.color}14;border:1px solid ${verdict.color};border-radius:10px;padding:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <div style="font-size:13px;font-weight:bold;color:${verdict.color};">📍 Fase actual: ${esc(phaseName)} <span style="font-size:10px;color:#9ca3af;font-weight:normal;">(${phase.range})</span></div>
+                    <div style="font-size:10px;color:${verdict.color};font-weight:bold;">${verdict.title}</div>
+                </div>
+                <div style="font-size:11px;color:#e5e7eb;font-style:italic;margin:6px 0;">“${esc(phase.quote)}”</div>
+                <div style="font-size:10.5px;color:#d1d5db;line-height:1.5;">${verdict.body}</div>
+            </div>`;
+        }
+    }
+
+    // Pestañas
+    let activeTab = '1';
+    function switchModalTab(tab, skipLoad) {
+        activeTab = tab === '2' ? '2' : '1';
+        document.querySelectorAll('[data-p7m-tab]').forEach((button) => {
+            button.classList.toggle('is-active', button.getAttribute('data-p7m-tab') === activeTab);
+        });
+        const pane1 = document.getElementById('p7m-pane-1');
+        const pane2 = document.getElementById('p7m-pane-2');
+        if (pane1) pane1.style.display = activeTab === '1' ? 'block' : 'none';
+        if (pane2) pane2.style.display = activeTab === '2' ? 'block' : 'none';
+        if (activeTab === '2') {
+            if (!skipLoad) loadRadar(false);
+            else renderRadar();
+        }
+    }
+
+    document.querySelectorAll('[data-p7m-tab]').forEach((button) => {
+        button.addEventListener('click', () => switchModalTab(button.getAttribute('data-p7m-tab')));
+    });
+    document.getElementById('p7c-refresh').addEventListener('click', () => loadRadar(true));
+
+    const socialSelect = document.getElementById('p7c-x-pulse-select');
+    if (socialSelect) {
+        socialSelect.value = String(radar.social);
+        socialSelect.addEventListener('change', () => {
+            radar.social = Number(socialSelect.value) || 50;
+            try { localStorage.setItem(SOCIAL_KEY, String(radar.social)); } catch (error) { /* almacenamiento no disponible */ }
+            renderRadar();
+        });
+    }
+
+    const cbbiInput = document.getElementById('p7c-cbbi-input');
+    if (cbbiInput) {
+        if (radar.manualCbbi != null) cbbiInput.value = String(Math.round(radar.manualCbbi));
+        const applyManual = () => {
+            const raw = cbbiInput.value.trim();
+            if (raw === '') {
+                radar.manualCbbi = null;
+                try { localStorage.removeItem(CBBI_KEY); } catch (error) { /* almacenamiento no disponible */ }
+            } else {
+                const value = Number(raw);
+                if (!Number.isFinite(value) || value < 0 || value > 100) return;
+                radar.manualCbbi = Math.round(value);
+                try { localStorage.setItem(CBBI_KEY, String(radar.manualCbbi)); } catch (error) { /* almacenamiento no disponible */ }
+            }
+            renderRadar();
+        };
+        cbbiInput.addEventListener('input', applyManual);
+        cbbiInput.addEventListener('change', applyManual);
+    }
+
+    // ------------------------------------------------------------------------
     // Abrir / cerrar
     // ------------------------------------------------------------------------
     function openModal(event) {
@@ -18394,6 +18875,8 @@
         renderSemaphore();
         renderPyramidDetail(activeFloor);
         showPhrase(false);
+        switchModalTab(activeTab, true);
+        if (activeTab === '2') loadRadar(false);
         const status = document.getElementById('p7m-notes-status');
         if (status) {
             status.textContent = `Se guardan en este navegador (clave ${NOTES_KEY}).`;
