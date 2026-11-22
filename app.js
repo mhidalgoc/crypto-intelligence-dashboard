@@ -19109,3 +19109,220 @@
     renderPyramidDetail(activeFloor);
     renderSemaphore();
 })();
+
+// ============================================================================
+// PANEL 8 AUTO-INYECTABLE: MANUAL COMPLETO DEL DASHBOARD (PDF)
+// Panel real en la barra lateral (Ã­ndice 08) y acceso desde el dock.
+// Incrusta manual-dashboard.pdf con descarga y apertura en pestaÃ±a nueva.
+// No modifica otros mÃ³dulos: solo aÃ±ade panel, nav, dock y estilos.
+// ============================================================================
+(function initManualPdfPanel() {
+    ['panel-manual', 'nav-panel-manual', 'mnav-panel-manual', 'dock-btn-manual', 'manual-pdf-style'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+    });
+    document.querySelectorAll('a[data-panel-target="panel-manual"]').forEach((a) => a.remove());
+
+    const PDF_URL = 'manual-dashboard.pdf';
+    let manualTimer = null;
+
+    function esc(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    const style = document.createElement('style');
+    style.id = 'manual-pdf-style';
+    style.textContent = `
+        #manual-frame { width:100%; height:78vh; min-height:560px; border:0; border-radius:8px; background:#f8fafc; display:block; }
+        .manual-btn { background:#151924; color:#d1d5db; border:1px solid #374151; border-radius:5px; padding:5px 9px; font-size:10px; font-weight:700; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:4px; }
+        .manual-btn:hover { filter:brightness(1.2); border-color:#60a5fa; }
+        @media (max-width: 760px) { #manual-frame { height:72vh; min-height:460px; } }
+    `;
+    document.head.appendChild(style);
+
+    const section = document.createElement('section');
+    section.className = 'view-panel';
+    section.id = 'panel-manual';
+    section.setAttribute('data-panel', 'manual');
+    section.setAttribute('aria-labelledby', 'manual-title');
+
+    section.innerHTML = `
+        <header class="section-heading">
+            <div class="section-heading-copy">
+                <div class="eyebrow"><span class="live-dot"></span> Panel 08 / DocumentaciÃ³n</div>
+                <h2 id="manual-title">Manual completo del dashboard</h2>
+                <p>Instructivo detallado de cada panel, pestaÃ±a, mÃ³dulo, botÃ³n y fuente de datos.</p>
+            </div>
+            <div class="heading-actions">
+                <span class="access-badge auto"><span class="access-dot"></span>PDF Â· 21 pÃ¡ginas</span>
+            </div>
+        </header>
+
+        <div class="card" style="padding:14px;margin-bottom:0;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                <div style="font-size:11px;color:#9ca3af;">
+                    Consulta el manual sin salir del dashboard. Si el visor no carga en tu dispositivo, descÃ¡rgalo o Ã¡brelo en una pestaÃ±a nueva.
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <a id="manual-download" class="manual-btn" href="${esc(PDF_URL)}" download="manual-dashboard.pdf" style="text-decoration:none;color:#10b981;border-color:#10b981;">⬇️ Descargar PDF</a>
+                    <a id="manual-open" class="manual-btn" href="${esc(PDF_URL)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;color:#60a5fa;border-color:#60a5fa;">↗ Abrir en pesta?a nueva</a>
+                    <button id="manual-reload" type="button" class="manual-btn">🔄 Recargar</button>
+                </div>
+            </div>
+            <div id="manual-status" style="font-size:10px;color:#6b7280;margin-bottom:6px;">El manual se cargarÃ¡ al abrir este panel.</div>
+            <div style="background:#090d16;border:1px solid #1f2937;border-radius:10px;padding:5px;overflow:hidden;">
+                <iframe id="manual-frame" title="Manual completo del Crypto Intelligence Dashboard" data-loaded="0"></iframe>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:9.5px;color:#6b7280;line-height:1.5;">
+                <span>ðŸ“˜ Cubre: paneles 01â€“08, Playbook, Reglas de Oro, Radar de Ciclo, Rainbow Chart y todos los mÃ³dulos del dock.</span>
+            </div>
+        </div>
+    `;
+
+    const playbook = document.getElementById('panel-playbook');
+    if (playbook && playbook.parentElement) {
+        playbook.parentElement.appendChild(section);
+    } else {
+        const airdrops = document.getElementById('panel-airdrops');
+        if (airdrops && airdrops.parentElement) airdrops.parentElement.appendChild(section);
+        else document.body.appendChild(section);
+    }
+
+    function activatePanel() {
+        document.querySelectorAll('.view-panel').forEach((p) => p.classList.toggle('is-active', p === section));
+        document.querySelectorAll('.nav-link, .mobile-nav a').forEach((link) => {
+            const isActive = link.dataset.panelTarget === 'panel-manual';
+            link.classList.toggle('is-active', isActive);
+            if (isActive) link.setAttribute('aria-current', 'page');
+            else link.removeAttribute('aria-current');
+        });
+        document.body.dataset.activePanel = 'manual';
+        loadManual(false);
+    }
+
+    function makeNavLink() {
+        const a = document.createElement('a');
+        a.className = 'nav-link';
+        a.href = '#panel-manual';
+        a.setAttribute('data-panel-target', 'panel-manual');
+        a.innerHTML = `
+            <span class="nav-index">08</span>
+            <span class="nav-icon"><i data-lucide="book-open"></i></span>
+            <span class="nav-copy"><strong>Manual</strong><small>GuÃ­a completa en PDF</small></span>
+            <i class="nav-chevron" data-lucide="chevron-right"></i>`;
+        a.addEventListener('click', (e) => {
+            e.preventDefault();
+            const sidebar = document.getElementById('app-sidebar');
+            const scrim = document.getElementById('sidebar-scrim');
+            if (sidebar) sidebar.classList.remove('is-open');
+            if (scrim) scrim.classList.remove('is-open');
+            if (window.location.hash === '#panel-manual') activatePanel();
+            else window.location.hash = 'panel-manual';
+        });
+        return a;
+    }
+
+    const sideAnchor = document.querySelector('nav.primary-nav a[data-panel-target="panel-golden-rules"]') ||
+                       document.querySelector('nav.primary-nav a[data-panel-target="panel-playbook"]');
+    if (sideAnchor) sideAnchor.insertAdjacentElement('afterend', makeNavLink());
+
+    const mobileAnchor = document.querySelector('.mobile-nav a[data-panel-target="panel-golden-rules"]') ||
+                         document.querySelector('.mobile-nav a[data-panel-target="panel-playbook"]');
+    if (mobileAnchor) mobileAnchor.insertAdjacentElement('afterend', makeNavLink());
+
+    if (window.lucide && typeof window.lucide.createIcons === 'function') window.lucide.createIcons();
+
+    if (window.location.hash === '#panel-manual') activatePanel();
+    window.addEventListener('hashchange', () => {
+        if (window.location.hash === '#panel-manual') activatePanel();
+    });
+
+    // ------------------------------------------------------------------------
+    // Carga del PDF bajo demanda
+    // ------------------------------------------------------------------------
+    function setManualStatus(text, color) {
+        const status = document.getElementById('manual-status');
+        if (!status) return;
+        status.textContent = text;
+        status.style.color = color || '#6b7280';
+    }
+
+    function loadManual(force) {
+        const frame = document.getElementById('manual-frame');
+        if (!frame) return;
+        if (!force && frame.getAttribute('data-loaded') === '1') return;
+
+        window.clearTimeout(manualTimer);
+        setManualStatus('â³ Cargando el manual en PDFâ€¦', '#f59e0b');
+
+        if (force) {
+            frame.setAttribute('data-loaded', '0');
+            frame.src = 'about:blank';
+        }
+
+        window.setTimeout(() => {
+            frame.src = force ? `${PDF_URL}?reload=${Date.now()}` : PDF_URL;
+        }, force ? 120 : 0);
+
+        manualTimer = window.setTimeout(() => {
+            if (frame.getAttribute('data-loaded') !== '1') {
+                setManualStatus('âš ï¸ El visor PDF estÃ¡ tardando. Usa Â«Descargar PDFÂ» o Â«Abrir en pestaÃ±a nuevaÂ».', '#ef4444');
+            }
+        }, 12000);
+    }
+
+    const frame = document.getElementById('manual-frame');
+    if (frame) {
+        frame.addEventListener('load', () => {
+            const src = frame.getAttribute('src') || '';
+            if (!src || src === 'about:blank') return;
+            frame.setAttribute('data-loaded', '1');
+            window.clearTimeout(manualTimer);
+            setManualStatus('âœ… Manual cargado Â· usa los botones para descargarlo o abrirlo aparte.', '#10b981');
+        });
+    }
+
+    document.getElementById('manual-reload').addEventListener('click', () => loadManual(true));
+
+    // ------------------------------------------------------------------------
+    // Acceso desde el dock
+    // ------------------------------------------------------------------------
+    function goToManual(event) {
+        if (event) event.preventDefault();
+        const sidebar = document.getElementById('app-sidebar');
+        const scrim = document.getElementById('sidebar-scrim');
+        if (sidebar) sidebar.classList.remove('is-open');
+        if (scrim) scrim.classList.remove('is-open');
+        if (window.location.hash === '#panel-manual') activatePanel();
+        else window.location.hash = 'panel-manual';
+    }
+
+    function installDockButton() {
+        const old = document.getElementById('dock-btn-manual');
+        if (old) old.remove();
+        const dock = document.getElementById('master-unified-bottom-dock');
+        if (!dock) return false;
+        const btn = document.createElement('button');
+        btn.id = 'dock-btn-manual';
+        btn.type = 'button';
+        btn.className = 'dock-btn is-primary';
+        btn.title = 'Abrir el manual completo en PDF';
+        btn.innerHTML = '<span class="dock-icon">ðŸ“˜</span><span class="dock-label">Manual</span>';
+        btn.addEventListener('click', goToManual);
+        dock.appendChild(btn);
+        return true;
+    }
+
+    if (!installDockButton()) {
+        let attempts = 0;
+        const watcher = window.setInterval(() => {
+            attempts += 1;
+            if (installDockButton() || attempts >= 25) window.clearInterval(watcher);
+        }, 400);
+    }
+
+    window.openManualPanel = goToManual;
+})();
+
