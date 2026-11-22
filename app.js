@@ -18979,6 +18979,38 @@
     installTrigger();
     window.setTimeout(installTrigger, 1400);
 
+    // ------------------------------------------------------------------------
+    // Unificación de entrada: el índice 07 del sidebar abre este mismo modal
+    // (se retira la vista antigua para que no existan dos Panel 7 distintos)
+    // ------------------------------------------------------------------------
+    function unifyPanelEntry() {
+        const oldPanel = document.getElementById('panel-golden-rules');
+        if (oldPanel) oldPanel.remove();
+
+        document.querySelectorAll('a[data-panel-target="panel-golden-rules"]').forEach((link) => {
+            const clone = link.cloneNode(true);
+            clone.classList.remove('is-active');
+            clone.removeAttribute('aria-current');
+            link.replaceWith(clone);
+            clone.addEventListener('click', (event) => {
+                event.preventDefault();
+                const sidebar = document.getElementById('app-sidebar');
+                const scrim = document.getElementById('sidebar-scrim');
+                if (sidebar) sidebar.classList.remove('is-open');
+                if (scrim) scrim.classList.remove('is-open');
+                openModal();
+            });
+        });
+    }
+
+    unifyPanelEntry();
+    window.setTimeout(unifyPanelEntry, 1200);
+
+    if (window.location.hash === '#panel-golden-rules') {
+        window.location.hash = 'panel-market';
+        window.setTimeout(openModal, 160);
+    }
+
     window.openPanel7GoldenRules = openModal;
     window.Panel7Modal = Object.freeze({
         open: openModal,
