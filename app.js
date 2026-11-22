@@ -17860,7 +17860,7 @@
             category: 'Estabilidad y Liquidez',
             color: '#10b981',
             width: '100%',
-            assets: 'Stablecoins (USDT/USDC) y Bitcoin (puerto extremadamente seguro y conservador; escasez absoluta de 21M y piso económico energético).',
+            assets: 'Stablecoins (USDT/USDC) y Bitcoin (país extremadamente seguro y conservador; escasez absoluta de 21M y piso económico energético).',
             environment: 'Mayor peso en Stablecoins en entorno de <strong>Altas Tasas y Miedo</strong> (munición lista para caídas extremas).',
             rule: 'Esta capa no se toca para perseguir altcoins. Es el escudo y la munición para comprar pánico.'
         }
