@@ -18038,6 +18038,7 @@
         <div id="p7m-tabbar" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
             <button type="button" class="p7m-tab is-active" data-p7m-tab="1">🧠 Reglas de Oro, Pirámide y Notas</button>
             <button type="button" class="p7m-tab" data-p7m-tab="2">🧭 Radar Psicológico de Ciclo (Wall St. Cheat Sheet)</button>
+            <button type="button" class="p7m-tab" data-p7m-tab="3">🌈 Bitcoin Rainbow Chart</button>
         </div>
 
         <div id="p7m-pane-1">
@@ -18180,6 +18181,30 @@
 
             <div style="font-size:9.5px;color:#6b7280;line-height:1.5;margin-top:8px;">
                 Metodología: Fear &amp; Greed 35% + CBBI/Mayer 30% + Funding y L/S 20% + Pulso social X 15%. Si una fuente falla, el score se repondera con las disponibles. El CBBI manual sustituye al sintético.
+            </div>
+        </div>
+
+        <div id="p7m-pane-3" style="display:none;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                <div>
+                    <div style="font-size:15px;font-weight:bold;color:#f59e0b;">🌈 Bitcoin Rainbow Chart</div>
+                    <div style="font-size:10.5px;color:#9ca3af;">Vista oficial de BlockchainCenter · se carga bajo demanda.</div>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                    <button id="p7r-reload" type="button" class="p7m-mini-btn">🔄 Recargar</button>
+                    <a class="p7m-link" href="https://www.blockchaincenter.net/es/bitcoin-rainbow-chart/" target="_blank" rel="noopener noreferrer">Abrir en pestaña nueva ↗</a>
+                </div>
+            </div>
+            <div id="p7r-status" style="font-size:10px;color:#6b7280;margin-bottom:6px;">El gráfico se cargará al abrir esta pestaña.</div>
+            <div style="background:#090d16;border:1px solid #1f2937;border-radius:10px;padding:4px;overflow:hidden;">
+                <iframe id="p7r-frame" title="Bitcoin Rainbow Chart de BlockchainCenter" data-loaded="0" data-src="https://www.blockchaincenter.net/es/bitcoin-rainbow-chart/" style="width:100%;height:68vh;min-height:480px;border:0;border-radius:8px;background:#0b0e14;display:block;"></iframe>
+            </div>
+            <div id="p7r-fallback" style="display:none;margin-top:8px;font-size:10.5px;color:#f59e0b;background:#111827;border:1px solid #f59e0b;border-radius:8px;padding:8px;line-height:1.5;">
+                ⚠️ Si el gráfico no carga (bloqueo de terceros, red lenta o móvil), ábrelo directamente:
+                <a href="https://www.blockchaincenter.net/es/bitcoin-rainbow-chart/" target="_blank" rel="noopener noreferrer" style="color:#60a5fa;font-weight:bold;">BlockchainCenter · Bitcoin Rainbow Chart ↗</a>
+            </div>
+            <div style="font-size:9.5px;color:#6b7280;line-height:1.5;margin-top:8px;">
+                El contenido pertenece a BlockchainCenter y se muestra embebido. Puede tardar unos segundos y no está disponible sin conexión.
             </div>
         </div>
 
@@ -18813,19 +18838,78 @@
     // Pestañas
     let activeTab = '1';
     function switchModalTab(tab, skipLoad) {
-        activeTab = tab === '2' ? '2' : '1';
+        activeTab = ['1', '2', '3'].includes(tab) ? tab : '1';
         document.querySelectorAll('[data-p7m-tab]').forEach((button) => {
             button.classList.toggle('is-active', button.getAttribute('data-p7m-tab') === activeTab);
         });
         const pane1 = document.getElementById('p7m-pane-1');
         const pane2 = document.getElementById('p7m-pane-2');
+        const pane3 = document.getElementById('p7m-pane-3');
         if (pane1) pane1.style.display = activeTab === '1' ? 'block' : 'none';
         if (pane2) pane2.style.display = activeTab === '2' ? 'block' : 'none';
+        if (pane3) pane3.style.display = activeTab === '3' ? 'block' : 'none';
         if (activeTab === '2') {
             if (!skipLoad) loadRadar(false);
             else renderRadar();
         }
+        if (activeTab === '3') loadRainbow(false);
     }
+
+    // ------------------------------------------------------------------------
+    // RAINBOW CHART (iframe bajo demanda)
+    // ------------------------------------------------------------------------
+    const RAINBOW_URL = 'https://www.blockchaincenter.net/es/bitcoin-rainbow-chart/';
+    let rainbowTimer = null;
+
+    function loadRainbow(force) {
+        const frame = document.getElementById('p7r-frame');
+        const status = document.getElementById('p7r-status');
+        const fallback = document.getElementById('p7r-fallback');
+        if (!frame) return;
+        if (frame.getAttribute('data-loaded') === '1' && !force) return;
+
+        window.clearTimeout(rainbowTimer);
+        if (force) {
+            frame.setAttribute('data-loaded', '0');
+            frame.src = 'about:blank';
+        }
+        if (status) {
+            status.textContent = '⏳ Cargando el Rainbow Chart de BlockchainCenter…';
+            status.style.color = '#f59e0b';
+        }
+        if (fallback) fallback.style.display = 'none';
+
+        const target = frame.getAttribute('data-src') || RAINBOW_URL;
+        window.setTimeout(() => { frame.src = target; }, force ? 120 : 0);
+
+        rainbowTimer = window.setTimeout(() => {
+            if (frame.getAttribute('data-loaded') !== '1') {
+                if (status) {
+                    status.textContent = '⚠️ El gráfico está tardando o el navegador bloqueó el iframe. Usa «Abrir en pestaña nueva».';
+                    status.style.color = '#ef4444';
+                }
+                if (fallback) fallback.style.display = 'block';
+            }
+        }, 15000);
+    }
+
+    const rainbowFrame = document.getElementById('p7r-frame');
+    if (rainbowFrame) {
+        rainbowFrame.addEventListener('load', () => {
+            const src = rainbowFrame.getAttribute('src') || '';
+            if (!src || src === 'about:blank') return;
+            rainbowFrame.setAttribute('data-loaded', '1');
+            window.clearTimeout(rainbowTimer);
+            const status = document.getElementById('p7r-status');
+            const fallback = document.getElementById('p7r-fallback');
+            if (status) {
+                status.textContent = '✅ Rainbow Chart cargado · BlockchainCenter';
+                status.style.color = '#10b981';
+            }
+            if (fallback) fallback.style.display = 'none';
+        });
+    }
+    document.getElementById('p7r-reload').addEventListener('click', () => loadRainbow(true));
 
     document.querySelectorAll('[data-p7m-tab]').forEach((button) => {
         button.addEventListener('click', () => switchModalTab(button.getAttribute('data-p7m-tab')));
@@ -18877,6 +18961,7 @@
         showPhrase(false);
         switchModalTab(activeTab, true);
         if (activeTab === '2') loadRadar(false);
+        if (activeTab === '3') loadRainbow(false);
         const status = document.getElementById('p7m-notes-status');
         if (status) {
             status.textContent = `Se guardan en este navegador (clave ${NOTES_KEY}).`;
