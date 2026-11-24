@@ -10379,6 +10379,7 @@
   let activeTab = 'TV';
   let currentTvPreset = 'SWING';
   let currentDexProvider = 'DEXSCREENER';
+  let currentQuantExchange = 'AUTO';
   let cachedDexPair = null;
   let tvLoadPending = false;
   let tvScriptState = 'idle';
@@ -10646,6 +10647,19 @@
               <button class="tcs-quant-tf" type="button" data-tf="4h" style="background:#10b981;color:#000;border:none;padding:5px 12px;border-radius:5px;font-size:12px;font-weight:bold;cursor:pointer;">4H (Swing principal)</button>
               <button class="tcs-quant-tf" type="button" data-tf="1d" style="background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:5px 12px;border-radius:5px;font-size:12px;cursor:pointer;">1D (Tendencia mayor)</button>
               <button class="tcs-quant-tf" type="button" data-tf="1h" style="background:#1f2937;color:#d1d5db;border:1px solid #374151;padding:5px 12px;border-radius:5px;font-size:12px;cursor:pointer;">1H (Gatillo de entrada)</button>
+              <span style="font-size:11px;color:#9ca3af;margin-left:6px;">Fuente de velas:</span>
+              <select id="tcs-quant-exchange" aria-label="Fuente de velas del laboratorio" style="background:#0b0e14;color:#fff;border:1px solid #374151;padding:5px 8px;border-radius:5px;font-size:12px;cursor:pointer;">
+                <option value="AUTO" selected>Auto (prioriza la fuente del gráfico)</option>
+                <option value="BINANCE">Binance Spot</option>
+                <option value="BINANCE_PERP">Binance Futuros</option>
+                <option value="MEXC">MEXC (Mid/Low Caps)</option>
+                <option value="BYBIT">Bybit</option>
+                <option value="OKX">OKX</option>
+                <option value="GATE">Gate.io</option>
+                <option value="KUCOIN">KuCoin</option>
+                <option value="BITGET">Bitget</option>
+                <option value="HTX">HTX</option>
+              </select>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
               <div id="tcs-quant-summary-badge" style="font-size:12px;font-weight:bold;color:#60a5fa;">
@@ -10669,7 +10683,7 @@
 
             <div style="background:#090d16;border:1px solid #1f2937;border-radius:8px;padding:10px;">
               <div style="display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;margin-bottom:4px;flex-wrap:wrap;gap:8px;">
-                <span><strong>CVD real (Cumulative Volume Delta):</strong> compras taker menos ventas taker, calculado con las velas de Binance</span>
+                <span><strong>CVD (Cumulative Volume Delta):</strong> compras taker menos ventas taker · <span id="tcs-cvd-source-note">calculado con las velas de Binance</span></span>
                 <span id="tcs-cvd-status-text" style="font-weight:bold;color:#10b981;">Analizando flujo...</span>
               </div>
               <canvas id="tcs-quant-cvd-canvas" width="900" height="130" style="width:100%;height:130px;display:block;"></canvas>
@@ -11446,13 +11460,279 @@
     status.style.color = color;
   }
 
+  // ------------------------------------------------------------------------
+  // MULTI-EXCHANGE KLINES PARA EL LABORATORIO CVD/POC
+  // ------------------------------------------------------------------------
+  const TCS_QUANT_SOURCE_META = {
+    BINANCE: { label: 'Binance Spot', short: 'Binance' },
+    BINANCE_PERP: { label: 'Binance Futuros', short: 'Binance Fut.' },
+    MEXC: { label: 'MEXC Spot', short: 'MEXC' },
+    BYBIT: { label: 'Bybit Spot', short: 'Bybit' },
+    OKX: { label: 'OKX Spot', short: 'OKX' },
+    GATE: { label: 'Gate.io Spot', short: 'Gate.io' },
+    KUCOIN: { label: 'KuCoin Spot', short: 'KuCoin' },
+    BITGET: { label: 'Bitget Spot', short: 'Bitget' },
+    HTX: { label: 'HTX Spot', short: 'HTX' }
+  };
+
+  function tcsQuantSymbols(source, clean) {
+    const quotes = source === 'BINANCE' ? ['USDT', 'USDC', 'FDUSD'] : ['USDT', 'USDC'];
+    return quotes.map((quote) => {
+      if (source === 'OKX' || source === 'KUCOIN') return `${clean}-${quote}`;
+      if (source === 'GATE') return `${clean}_${quote}`;
+      if (source === 'HTX') return `${clean.toLowerCase()}${quote.toLowerCase()}`;
+      return `${clean}${quote}`;
+    });
+  }
+
+  function tcsQuantInterval(source, timeframe) {
+    if (source === 'MEXC') return timeframe === '1h' ? '60m' : timeframe;
+    if (source === 'BYBIT') return timeframe === '1h' ? '60' : (timeframe === '4h' ? '240' : 'D');
+    if (source === 'OKX') return timeframe === '1h' ? '1H' : (timeframe === '4h' ? '4H' : '1D');
+    if (source === 'KUCOIN') return timeframe === '1h' ? '1hour' : (timeframe === '4h' ? '4hour' : '1day');
+    if (source === 'BITGET') return timeframe === '1d' ? '1day' : timeframe;
+    if (source === 'HTX') return timeframe === '1h' ? '60min' : (timeframe === '4h' ? '4hour' : '1day');
+    return timeframe;
+  }
+
+  function tcsQuantUrl(source, symbol, timeframe) {
+    const interval = tcsQuantInterval(source, timeframe);
+    const encoded = encodeURIComponent(symbol);
+    switch (source) {
+      case 'BINANCE':
+        return `https://api.binance.com/api/v3/klines?symbol=${encoded}&interval=${interval}&limit=200`;
+      case 'BINANCE_PERP':
+        return `https://fapi.binance.com/fapi/v1/klines?symbol=${encoded}&interval=${interval}&limit=200`;
+      case 'MEXC':
+        return `https://api.mexc.com/api/v3/klines?symbol=${encoded}&interval=${interval}&limit=200`;
+      case 'BYBIT':
+        return `https://api.bybit.com/v5/market/kline?category=spot&symbol=${encoded}&interval=${interval}&limit=200`;
+      case 'OKX':
+        return `https://www.okx.com/api/v5/market/candles?instId=${encoded}&bar=${interval}&limit=200`;
+      case 'GATE':
+        return `https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${encoded}&interval=${interval}&limit=200`;
+      case 'KUCOIN':
+        return `https://api.kucoin.com/api/v1/market/candles?type=${interval}&symbol=${encoded}`;
+      case 'BITGET':
+        return `https://api.bitget.com/api/v2/spot/market/candles?symbol=${encoded}&granularity=${interval}&limit=200`;
+      case 'HTX':
+        return `https://api.huobi.pro/market/history/kline?symbol=${encoded}&period=${interval}&size=200`;
+      default:
+        return '';
+    }
+  }
+
+  async function tcsQuantFetch(url, timeoutMs = 9000) {
+    if (!url) throw new Error('URL vacía');
+    const attempts = [];
+    try {
+      const local = typeof window.QuantLocalProxy === 'function' ? window.QuantLocalProxy(url) : null;
+      if (local) attempts.push(local);
+    } catch (error) { /* sin proxy local */ }
+    attempts.push(url);
+
+    const needsCorsProxy = /api\.mexc\.com|api\.kucoin\.com/.test(url);
+    if (needsCorsProxy) {
+      attempts.push('https://proxy.corsfix.com/?' + url);
+      attempts.push('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
+      attempts.push('https://r.jina.ai/' + url);
+    }
+
+    let lastError = null;
+    const deadline = Date.now() + timeoutMs;
+    for (const target of attempts) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), Math.min(remaining, timeoutMs));
+      try {
+        const response = await fetch(target, { cache: 'no-store', credentials: 'omit', signal: controller.signal });
+        if (!response.ok) {
+          const error = new Error('HTTP ' + response.status);
+          error.fatal = [400, 404, 422].includes(response.status);
+          throw error;
+        }
+        const text = await response.text();
+        try {
+          return JSON.parse(text);
+        } catch (jsonError) {
+          const marker = text.indexOf('Markdown Content:');
+          if (marker >= 0) return JSON.parse(text.slice(marker + 'Markdown Content:'.length).trim());
+          throw new Error('Respuesta no JSON');
+        }
+      } catch (error) {
+        lastError = error;
+        if (error && error.fatal) break;
+      } finally {
+        window.clearTimeout(timer);
+      }
+    }
+    throw lastError || new Error('Sin respuesta');
+  }
+
+  function tcsNormalizeQuantCandles(source, raw) {
+    let rows = [];
+    if (source === 'BYBIT') rows = (raw && raw.result && Array.isArray(raw.result.list)) ? raw.result.list : [];
+    else if (source === 'OKX' || source === 'KUCOIN' || source === 'BITGET' || source === 'HTX') rows = (raw && Array.isArray(raw.data)) ? raw.data : [];
+    else rows = Array.isArray(raw) ? raw : [];
+
+    const candles = rows.map((row) => {
+      let time;
+      let open;
+      let high;
+      let low;
+      let close;
+      let vol;
+      let takerBuy = null;
+
+      if (source === 'KUCOIN') {
+        time = Number(row[0]) * 1000;
+        open = Number(row[1]);
+        close = Number(row[2]);
+        high = Number(row[3]);
+        low = Number(row[4]);
+        vol = Number(row[5]);
+      } else if (source === 'GATE') {
+        time = Number(row[0]) * 1000;
+        close = Number(row[2]);
+        high = Number(row[3]);
+        low = Number(row[4]);
+        open = Number(row[5]);
+        vol = Number(row[6]);
+      } else if (source === 'HTX') {
+        time = Number(row.id) * 1000;
+        open = Number(row.open);
+        high = Number(row.high);
+        low = Number(row.low);
+        close = Number(row.close);
+        vol = Number(row.amount);
+      } else if (source === 'BITGET') {
+        time = Number(row[0]);
+        open = Number(row[1]);
+        high = Number(row[2]);
+        low = Number(row[3]);
+        close = Number(row[4]);
+        vol = Number(row[5]);
+      } else if (source === 'BYBIT' || source === 'OKX') {
+        time = Number(row[0]);
+        open = Number(row[1]);
+        high = Number(row[2]);
+        low = Number(row[3]);
+        close = Number(row[4]);
+        vol = Number(row[5]);
+      } else {
+        time = Number(row[0]);
+        open = Number(row[1]);
+        high = Number(row[2]);
+        low = Number(row[3]);
+        close = Number(row[4]);
+        vol = Number(row[5]);
+        if ((source === 'BINANCE' || source === 'BINANCE_PERP') && row[9] != null) takerBuy = Number(row[9]);
+      }
+
+      if (![time, open, high, low, close, vol].every(Number.isFinite) || vol < 0 || high < low || open <= 0 || close <= 0) return null;
+      if (time < 1e12) time *= 1000;
+
+      let buyVol;
+      let takerReal = false;
+      if (takerBuy != null && Number.isFinite(takerBuy) && takerBuy >= 0) {
+        buyVol = Math.min(takerBuy, vol);
+        takerReal = true;
+      } else {
+        const range = high - low;
+        const ratio = range > 0 ? Math.min(Math.max((close - low) / range, 0), 1) : 0.5;
+        buyVol = vol * ratio;
+      }
+      const sellVol = Math.max(vol - buyVol, 0);
+      return {
+        time,
+        open,
+        high,
+        low,
+        close,
+        vol,
+        buyVol,
+        sellVol,
+        delta: buyVol - sellVol,
+        takerReal
+      };
+    }).filter(Boolean);
+
+    const byTime = new Map();
+    candles.forEach((candle) => byTime.set(candle.time, candle));
+    return [...byTime.values()].sort((a, b) => a.time - b.time);
+  }
+
+  async function tcsTryQuantSource(source, cleanSym, timeframe, primaryOnly) {
+    const symbols = tcsQuantSymbols(source, cleanSym);
+    const candidates = primaryOnly ? symbols.slice(0, 1) : symbols;
+    for (const symbol of candidates) {
+      try {
+        const raw = await tcsQuantFetch(tcsQuantUrl(source, symbol, timeframe), 7000);
+        const candles = tcsNormalizeQuantCandles(source, raw).slice(-200);
+        if (candles.length >= 50) {
+          const realCount = candles.filter((candle) => candle.takerReal).length;
+          const realMode = realCount === candles.length ? 'real' : (realCount > 0 ? 'mixto' : 'estimado');
+          return {
+            source,
+            symbol,
+            candles,
+            label: TCS_QUANT_SOURCE_META[source] ? TCS_QUANT_SOURCE_META[source].label : source,
+            realMode
+          };
+        }
+      } catch (error) { /* probar siguiente símbolo o exchange */ }
+    }
+    return null;
+  }
+
+  async function tcsResolveQuantCandles(cleanSym, timeframe) {
+    const allSources = Object.keys(TCS_QUANT_SOURCE_META);
+    let desired = currentQuantExchange;
+    if (desired === 'AUTO') {
+      const tvExchange = document.getElementById('tcs-tv-exchange');
+      const tvValue = tvExchange ? tvExchange.value : 'BINANCE';
+      desired = allSources.includes(tvValue) ? tvValue : 'BINANCE';
+    }
+    if (!allSources.includes(desired)) desired = 'BINANCE';
+
+    const preferred = await tcsTryQuantSource(desired, cleanSym, timeframe, true);
+    if (preferred) return { ...preferred, desired, fallback: false };
+
+    const others = allSources.filter((source) => source !== desired);
+    const found = await new Promise((resolve) => {
+      let pending = others.length;
+      if (!pending) { resolve(null); return; }
+      others.forEach((source) => {
+        tcsTryQuantSource(source, cleanSym, timeframe, true)
+          .then((result) => {
+            if (result) resolve(result);
+            else {
+              pending -= 1;
+              if (!pending) resolve(null);
+            }
+          })
+          .catch(() => {
+            pending -= 1;
+            if (!pending) resolve(null);
+          });
+      });
+    });
+    if (found) return { ...found, desired, fallback: true };
+
+    const error = new Error('Sin velas en ninguna fuente');
+    error.desired = desired;
+    error.tried = allSources;
+    throw error;
+  }
+
   async function runQuantitativeLabScan() {
     const requestId = ++quantRequestId;
     if (!quantBadge) return;
 
     if (tcsIsContract(currentAsset)) {
       quantBadge.innerHTML = `<span style="color:#f59e0b;">⚠️ El activo es un contrato on-chain. Usa la Vista 2 (DEX) para su pool.</span>`;
-      tcsClearQuantOutputs('El laboratorio CVD/POC trabaja con pares de Binance Spot. Para contratos on-chain usa la Vista 2.');
+      tcsClearQuantOutputs('El laboratorio CVD/POC usa pares spot de Binance, MEXC, Bybit, OKX, Gate y KuCoin. Para contratos on-chain usa la Vista 2.');
       tcsSetCvdStatus('Sin datos on-chain', '#f59e0b');
       return;
     }
@@ -11466,50 +11746,28 @@
     }
 
     const interval = ['4h', '1d', '1h'].includes(currentTimeframe) ? currentTimeframe : '4h';
-    quantBadge.innerHTML = `⏳ Descargando 200 velas de ${tcsEscape(cleanSym)}USDT (${tcsEscape(interval.toUpperCase())}) y calculando CVD/POC...`;
+    const requestedLabel = currentQuantExchange === 'AUTO'
+      ? 'Auto'
+      : (TCS_QUANT_SOURCE_META[currentQuantExchange] ? TCS_QUANT_SOURCE_META[currentQuantExchange].label : currentQuantExchange);
+    quantBadge.innerHTML = `⏳ Buscando 200 velas de ${tcsEscape(cleanSym)} (${tcsEscape(interval.toUpperCase())}) en ${tcsEscape(requestedLabel)} y alternativas...`;
     tcsClearQuantOutputs('Descargando velas y calculando order flow...');
+    const cvdSourceNote = document.getElementById('tcs-cvd-source-note');
+    if (cvdSourceNote) cvdSourceNote.textContent = 'buscando la mejor fuente disponible…';
 
     try {
-      const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(`${cleanSym}USDT`)}&interval=${encodeURIComponent(interval)}&limit=200`;
-      const rawKlines = await tcsFetchJson(url, 20000);
+      const resolution = await tcsResolveQuantCandles(cleanSym, interval);
       if (requestId !== quantRequestId) return;
 
-      if (!Array.isArray(rawKlines) || rawKlines.length < 50) {
-        quantBadge.innerHTML = `<span style="color:#f59e0b;">⚠️ ${tcsEscape(cleanSym)}USDT no está listado en Binance Spot. Usa la Vista 2 (DEX) para activos on-chain.</span>`;
-        tcsClearQuantOutputs('Par no disponible en Binance Spot. Prueba otro ticker o usa la Vista 2 para el pool DEX.');
-        tcsSetCvdStatus('Par no disponible', '#f59e0b');
-        return;
-      }
-
-      const candles = rawKlines.map((k) => {
-        const open = Number(k[1]);
-        const high = Number(k[2]);
-        const low = Number(k[3]);
-        const close = Number(k[4]);
-        const vol = Number(k[5]);
-        const rawBuy = Number(k[9]);
-        if (![open, high, low, close, vol, rawBuy].every(Number.isFinite)) return null;
-        const buyVol = Math.min(Math.max(rawBuy, 0), Math.max(vol, 0));
-        const sellVol = Math.max(vol - buyVol, 0);
-        return {
-          time: Number(k[0]),
-          open,
-          high,
-          low,
-          close,
-          vol,
-          buyVol,
-          sellVol,
-          delta: buyVol - sellVol
-        };
-      }).filter(Boolean);
-
-      if (candles.length < 50) {
-        quantBadge.innerHTML = `<span style="color:#f59e0b;">⚠️ No hay suficientes velas válidas para ${tcsEscape(cleanSym)}USDT.</span>`;
-        tcsClearQuantOutputs('No hay suficientes velas válidas para calcular el perfil de volumen.');
-        tcsSetCvdStatus('Sin velas suficientes', '#f59e0b');
-        return;
-      }
+      const candles = resolution.candles;
+      const sourceLabel = resolution.label;
+      const realModeLabel = resolution.realMode === 'real'
+        ? 'delta taker real'
+        : (resolution.realMode === 'mixto' ? 'delta mixto (taker + estimado)' : 'delta estimado por OHLC');
+      const fallbackLabel = resolution.fallback
+        ? `${TCS_QUANT_SOURCE_META[resolution.desired] ? TCS_QUANT_SOURCE_META[resolution.desired].label : resolution.desired} no tenía el par`
+        : '';
+      if (cvdSourceNote) cvdSourceNote.textContent = `${sourceLabel} · ${realModeLabel}${fallbackLabel ? ` · ${fallbackLabel}` : ''}`;
+      quantBadge.innerHTML = `✅ ${tcsEscape(cleanSym)} · ${candles.length} velas ${tcsEscape(interval.toUpperCase())} desde <strong>${tcsEscape(sourceLabel)}</strong>${fallbackLabel ? ` <span style="color:#f59e0b;font-weight:normal;">(${tcsEscape(fallbackLabel)}; se usó ${tcsEscape(sourceLabel)})</span>` : ''}`;
 
       const closes = candles.map((c) => c.close);
       const ema20 = tcsCalcEma(closes, 20);
@@ -11575,7 +11833,7 @@
       else if (cvdChange15 < 0) cvdFlowVerdict = '🔴 Presión de venta taker dominante';
 
       tcsSetCvdStatus(cvdFlowVerdict, cvdChange15 >= 0 ? '#10b981' : '#ef4444');
-      quantBadge.innerHTML = `✅ Escaneo completado: <strong>${tcsEscape(cleanSym)}/USDT (${tcsEscape(interval.toUpperCase())})</strong>`;
+      quantBadge.innerHTML = `✅ Escaneo completado: <strong>${tcsEscape(cleanSym)} (${tcsEscape(interval.toUpperCase())})</strong> · ${tcsEscape(sourceLabel)}${resolution.fallback ? ` <span style="color:#f59e0b;font-weight:normal;">(${tcsEscape(TCS_QUANT_SOURCE_META[resolution.desired] ? TCS_QUANT_SOURCE_META[resolution.desired].short : resolution.desired)} no tenía el par)</span>` : ''}${resolution.realMode === 'estimado' ? ' · CVD estimado' : ''}`;
 
       const grid = document.getElementById('tcs-quant-metrics-grid');
       if (grid) {
@@ -11642,9 +11900,12 @@
     } catch (error) {
       if (requestId !== quantRequestId) return;
       console.error('Laboratorio cuantitativo:', error);
-      quantBadge.innerHTML = `<span style="color:#ef4444;">No se pudo descargar ${tcsEscape(cleanSym)}USDT (${tcsEscape(interval.toUpperCase())}). Revisa la conexión o prueba otro par.</span>`;
-      tcsClearQuantOutputs('Error de conexión con Binance. El escaneo no se pudo completar.');
-      tcsSetCvdStatus('Sin datos', '#ef4444');
+      const triedSources = error && error.tried
+        ? error.tried.map((source) => (TCS_QUANT_SOURCE_META[source] ? TCS_QUANT_SOURCE_META[source].short : source)).join(', ')
+        : 'Binance, MEXC, Bybit, OKX, Gate, KuCoin';
+      quantBadge.innerHTML = `<span style="color:#ef4444;">No hay velas de ${tcsEscape(cleanSym)} (${tcsEscape(interval.toUpperCase())}) en: ${tcsEscape(triedSources)}. Prueba el ticker exacto o usa la Vista 2.</span>`;
+      tcsClearQuantOutputs('Ninguna fuente tenía el par. Prueba otro ticker o la Vista 2 para el pool DEX.');
+      tcsSetCvdStatus('Par no disponible en las fuentes', '#f59e0b');
     }
   }
 
@@ -12755,8 +13016,20 @@
 
   const exchangeSelect = document.getElementById('tcs-tv-exchange');
   const intervalSelect = document.getElementById('tcs-tv-interval');
-  if (exchangeSelect) exchangeSelect.onchange = loadTradingViewWidget;
+  if (exchangeSelect) exchangeSelect.onchange = () => {
+    loadTradingViewWidget();
+    if (activeTab === 'QUANT') runQuantitativeLabScan();
+  };
   if (intervalSelect) intervalSelect.onchange = loadTradingViewWidget;
+
+  const quantExchangeSelect = document.getElementById('tcs-quant-exchange');
+  if (quantExchangeSelect) {
+    quantExchangeSelect.value = currentQuantExchange;
+    quantExchangeSelect.onchange = () => {
+      currentQuantExchange = quantExchangeSelect.value || 'AUTO';
+      if (activeTab === 'QUANT') runQuantitativeLabScan();
+    };
+  }
 
   document.querySelectorAll('.tcs-preset-btn').forEach((button) => {
     button.onclick = () => {
@@ -19112,9 +19385,15 @@
 
 // ============================================================================
 // PANEL 8 AUTO-INYECTABLE: MANUAL COMPLETO DEL DASHBOARD (PDF)
-// Panel real en la barra lateral (Ã­ndice 08) y acceso desde el dock.
-// Incrusta manual-dashboard.pdf con descarga y apertura en pestaÃ±a nueva.
-// No modifica otros mÃ³dulos: solo aÃ±ade panel, nav, dock y estilos.
+// Panel real en la barra lateral (índice 08) y acceso desde el dock.
+// Incrusta manual-dashboard.pdf con descarga y apertura en pestaña nueva.
+// No modifica otros módulos: solo añade panel, nav, dock y estilos.
+
+// ============================================================================
+// PANEL 8 AUTO-INYECTABLE: MANUAL COMPLETO DEL DASHBOARD (PDF)
+// Panel real en la barra lateral (índice 08) y acceso desde el dock.
+// Incrusta manual-dashboard.pdf con descarga y apertura en pestaña nueva.
+// No modifica otros módulos: solo añade panel, nav, dock y estilos.
 // ============================================================================
 (function initManualPdfPanel() {
     ['panel-manual', 'nav-panel-manual', 'mnav-panel-manual', 'dock-btn-manual', 'manual-pdf-style'].forEach((id) => {
@@ -19151,32 +19430,32 @@
     section.innerHTML = `
         <header class="section-heading">
             <div class="section-heading-copy">
-                <div class="eyebrow"><span class="live-dot"></span> Panel 08 / DocumentaciÃ³n</div>
+                <div class="eyebrow"><span class="live-dot"></span> Panel 08 / Documentación</div>
                 <h2 id="manual-title">Manual completo del dashboard</h2>
-                <p>Instructivo detallado de cada panel, pestaÃ±a, mÃ³dulo, botÃ³n y fuente de datos.</p>
+                <p>Instructivo detallado de cada panel, pestaña, módulo, botón y fuente de datos.</p>
             </div>
             <div class="heading-actions">
-                <span class="access-badge auto"><span class="access-dot"></span>PDF Â· 21 pÃ¡ginas</span>
+                <span class="access-badge auto"><span class="access-dot"></span>PDF · Manual completo</span>
             </div>
         </header>
 
         <div class="card" style="padding:14px;margin-bottom:0;">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
                 <div style="font-size:11px;color:#9ca3af;">
-                    Consulta el manual sin salir del dashboard. Si el visor no carga en tu dispositivo, descÃ¡rgalo o Ã¡brelo en una pestaÃ±a nueva.
+                    Consulta el manual sin salir del dashboard. Si el visor no carga en tu dispositivo, descárgalo o ábrelo en una pestaña nueva.
                 </div>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                    <a id="manual-download" class="manual-btn" href="${esc(PDF_URL)}" download="manual-dashboard.pdf" style="text-decoration:none;color:#10b981;border-color:#10b981;">⬇️ Descargar PDF</a>
-                    <a id="manual-open" class="manual-btn" href="${esc(PDF_URL)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;color:#60a5fa;border-color:#60a5fa;">↗ Abrir en pesta?a nueva</a>
+                    <a id="manual-download" class="manual-btn" href="${esc(PDF_URL)}" download="manual-dashboard.pdf" style="color:#10b981;border-color:#10b981;">⬇️ Descargar PDF</a>
+                    <a id="manual-open" class="manual-btn" href="${esc(PDF_URL)}" target="_blank" rel="noopener noreferrer" style="color:#60a5fa;border-color:#60a5fa;">↗ Abrir en pestaña nueva</a>
                     <button id="manual-reload" type="button" class="manual-btn">🔄 Recargar</button>
                 </div>
             </div>
-            <div id="manual-status" style="font-size:10px;color:#6b7280;margin-bottom:6px;">El manual se cargarÃ¡ al abrir este panel.</div>
+            <div id="manual-status" style="font-size:10px;color:#6b7280;margin-bottom:6px;">El manual se cargará al abrir este panel.</div>
             <div style="background:#090d16;border:1px solid #1f2937;border-radius:10px;padding:5px;overflow:hidden;">
                 <iframe id="manual-frame" title="Manual completo del Crypto Intelligence Dashboard" data-loaded="0"></iframe>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:9.5px;color:#6b7280;line-height:1.5;">
-                <span>ðŸ“˜ Cubre: paneles 01â€“08, Playbook, Reglas de Oro, Radar de Ciclo, Rainbow Chart y todos los mÃ³dulos del dock.</span>
+                <span>📘 Cubre: paneles 01–08, Playbook, Reglas de Oro, Radar de Ciclo, Rainbow Chart y todos los módulos del dock.</span>
             </div>
         </div>
     `;
@@ -19210,7 +19489,7 @@
         a.innerHTML = `
             <span class="nav-index">08</span>
             <span class="nav-icon"><i data-lucide="book-open"></i></span>
-            <span class="nav-copy"><strong>Manual</strong><small>GuÃ­a completa en PDF</small></span>
+            <span class="nav-copy"><strong>Manual</strong><small>Guía completa en PDF</small></span>
             <i class="nav-chevron" data-lucide="chevron-right"></i>`;
         a.addEventListener('click', (e) => {
             e.preventDefault();
@@ -19255,7 +19534,7 @@
         if (!force && frame.getAttribute('data-loaded') === '1') return;
 
         window.clearTimeout(manualTimer);
-        setManualStatus('â³ Cargando el manual en PDFâ€¦', '#f59e0b');
+        setManualStatus('⏳ Cargando el manual en PDF…', '#f59e0b');
 
         if (force) {
             frame.setAttribute('data-loaded', '0');
@@ -19268,7 +19547,7 @@
 
         manualTimer = window.setTimeout(() => {
             if (frame.getAttribute('data-loaded') !== '1') {
-                setManualStatus('âš ï¸ El visor PDF estÃ¡ tardando. Usa Â«Descargar PDFÂ» o Â«Abrir en pestaÃ±a nuevaÂ».', '#ef4444');
+                setManualStatus('⚠️ El visor PDF está tardando. Usa «Descargar PDF» o «Abrir en pestaña nueva».', '#ef4444');
             }
         }, 12000);
     }
@@ -19280,7 +19559,7 @@
             if (!src || src === 'about:blank') return;
             frame.setAttribute('data-loaded', '1');
             window.clearTimeout(manualTimer);
-            setManualStatus('âœ… Manual cargado Â· usa los botones para descargarlo o abrirlo aparte.', '#10b981');
+            setManualStatus('✅ Manual cargado · usa los botones para descargarlo o abrirlo aparte.', '#10b981');
         });
     }
 
@@ -19309,7 +19588,7 @@
         btn.type = 'button';
         btn.className = 'dock-btn is-primary';
         btn.title = 'Abrir el manual completo en PDF';
-        btn.innerHTML = '<span class="dock-icon">ðŸ“˜</span><span class="dock-label">Manual</span>';
+        btn.innerHTML = '<span class="dock-icon">📘</span><span class="dock-label">Manual</span>';
         btn.addEventListener('click', goToManual);
         dock.appendChild(btn);
         return true;
@@ -19325,4 +19604,3 @@
 
     window.openManualPanel = goToManual;
 })();
-
