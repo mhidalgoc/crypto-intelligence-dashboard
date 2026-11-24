@@ -11533,9 +11533,10 @@
 
     const needsCorsProxy = /api\.mexc\.com|api\.kucoin\.com/.test(url);
     if (needsCorsProxy) {
-      attempts.push('https://proxy.corsfix.com/?' + url);
-      attempts.push('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
+      // Jina Reader funciona desde GitHub Pages y devuelve el JSON como texto.
       attempts.push('https://r.jina.ai/' + url);
+      attempts.push('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
+      attempts.push('https://proxy.corsfix.com/?' + url);
     }
 
     let lastError = null;
