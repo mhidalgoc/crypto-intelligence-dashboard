@@ -19605,3 +19605,1200 @@
 
     window.openManualPanel = goToManual;
 })();
+
+// ============================================================================
+// PANEL 01 · MOTOR CUANTITATIVO DE PORTAFOLIO & FUSIÓN DE INDICADORES
+// Pestaña "💼 Mi Portafolio Quant" dentro de #panel-wallet.
+// Multi-lote, KPIs, RSI/VWAP/EMA/ATR/Fib, DCA y respaldo JSON.
+// No modifica módulos previos: solo añade pestaña, panel, estilos y dock.
+// ============================================================================
+(function initPanel1PortfolioQuantModule() {
+    const STORAGE_KEY = 'crypto_panel1_portfolio_v2';
+    const state = {
+        positions: [],
+        market: new Map(),
+        expanded: new Set(),
+        activeTab: 'wallets',
+        loading: false,
+        lastFetch: 0
+    };
+    const coingeckoIds = new Map();
+
+    // ------------------------------------------------------------------------
+    // Utilidades
+    // ------------------------------------------------------------------------
+    function esc(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    function uid(prefix) {
+        return prefix + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    }
+
+    function sanitizeTicker(raw) {
+        return String(raw || '')
+            .trim().toUpperCase()
+            .replace(/USDT$/i, '')
+            .replace(/[^A-Z0-9]/g, '')
+            .slice(0, 15);
+    }
+
+    function num(value) {
+        if (value === null || value === undefined || value === '') return null;
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+    }
+
+    function fmtPrice(value) {
+        const n = num(value);
+        if (n == null || n <= 0) return '—';
+        if (n >= 1000) return '$' + n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+        if (n >= 1) return '$' + n.toLocaleString('en-US', { maximumFractionDigits: 4 });
+        if (n >= 0.01) return '$' + n.toLocaleString('en-US', { maximumFractionDigits: 6 });
+        return '$' + n.toLocaleString('en-US', { maximumFractionDigits: 8 });
+    }
+
+    function fmtQty(value) {
+        const n = num(value);
+        if (n == null) return '—';
+        return n.toLocaleString('en-US', { maximumFractionDigits: n < 1 ? 6 : 4 });
+    }
+
+    function fmtUsd(value) {
+        const n = num(value);
+        if (n == null) return '—';
+        const sign = n < 0 ? '-' : '';
+        return sign + '$' + Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 2 });
+    }
+
+    function fmtPct(value, digits = 2) {
+        const n = num(value);
+        if (n == null) return '—';
+        return `${n >= 0 ? '+' : ''}${n.toFixed(digits)}%`;
+    }
+
+    function fmtDate(value) {
+        if (!value) return '—';
+        try {
+            return new Date(value).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: '2-digit' });
+        } catch (error) { return '—'; }
+    }
+
+    function pnlClass(value) {
+        const n = num(value);
+        if (n == null) return '';
+        return n > 0 ? 'p1q-green' : (n < 0 ? 'p1q-red' : '');
+    }
+
+    // ------------------------------------------------------------------------
+    // Persistencia
+    // ------------------------------------------------------------------------
+    function normalizePositions(raw) {
+        if (!Array.isArray(raw)) return [];
+        const output = [];
+        raw.forEach((item) => {
+            if (!item) return;
+            const ticker = sanitizeTicker(item.ticker || item.symbol || '');
+            if (!ticker) return;
+            let lots = [];
+            if (Array.isArray(item.lots)) {
+                lots = item.lots.map((lot) => ({
+                    id: String(lot && lot.id ? lot.id : uid('lot')),
+                    qty: num(lot && lot.qty),
+                    price: num(lot && lot.price),
+                    date: lot && lot.date ? String(lot.date) : new Date().toISOString()
+                })).filter((lot) => lot.qty > 0 && lot.price > 0);
+            } else {
+                const qty = num(item.qty);
+                const price = num(item.price || item.avgPrice || item.average);
+                if (qty > 0 && price > 0) {
+                    lots = [{ id: uid('lot'), qty, price, date: item.date || new Date().toISOString() }];
+                }
+            }
+            if (!lots.length) return;
+            const existing = output.find((position) => position.ticker === ticker);
+            if (existing) existing.lots.push(...lots);
+            else output.push({ ticker, lots });
+        });
+        return output;
+    }
+
+    function loadPositions() {
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) return normalizePositions(parsed);
+            if (parsed && Array.isArray(parsed.positions)) return normalizePositions(parsed.positions);
+            return [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function savePositions() {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, savedAt: new Date().toISOString(), positions: state.positions }));
+        } catch (error) { /* almacenamiento no disponible */ }
+    }
+
+    function positionTotals(position) {
+        const qty = position.lots.reduce((sum, lot) => sum + lot.qty, 0);
+        const cost = position.lots.reduce((sum, lot) => sum + (lot.qty * lot.price), 0);
+        return { qty, cost, avg: qty > 0 ? cost / qty : 0 };
+    }
+
+    // ------------------------------------------------------------------------
+    // Indicadores
+    // ------------------------------------------------------------------------
+    function calcRsi(values, period = 14) {
+        const out = new Array(values.length).fill(null);
+        if (values.length <= period) return out;
+        let gain = 0;
+        let loss = 0;
+        for (let i = 1; i <= period; i += 1) {
+            const diff = values[i] - values[i - 1];
+            if (diff >= 0) gain += diff;
+            else loss -= diff;
+        }
+        let avgGain = gain / period;
+        let avgLoss = loss / period;
+        out[period] = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
+        for (let i = period + 1; i < values.length; i += 1) {
+            const diff = values[i] - values[i - 1];
+            const g = diff > 0 ? diff : 0;
+            const l = diff < 0 ? -diff : 0;
+            avgGain = ((avgGain * (period - 1)) + g) / period;
+            avgLoss = ((avgLoss * (period - 1)) + l) / period;
+            out[i] = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
+        }
+        return out;
+    }
+
+    function calcEma(values, period) {
+        const out = new Array(values.length).fill(null);
+        if (values.length < period) return out;
+        let sum = 0;
+        for (let i = 0; i < period; i += 1) sum += values[i];
+        let prev = sum / period;
+        out[period - 1] = prev;
+        const k = 2 / (period + 1);
+        for (let i = period; i < values.length; i += 1) {
+            prev = (values[i] * k) + (prev * (1 - k));
+            out[i] = prev;
+        }
+        return out;
+    }
+
+    function calcAtr(candles, period = 14) {
+        if (candles.length <= period) return null;
+        const trs = [];
+        for (let i = 1; i < candles.length; i += 1) {
+            const current = candles[i];
+            const previous = candles[i - 1];
+            trs.push(Math.max(
+                current.high - current.low,
+                Math.abs(current.high - previous.close),
+                Math.abs(current.low - previous.close)
+            ));
+        }
+        let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+        for (let i = period; i < trs.length; i += 1) {
+            atr = ((atr * (period - 1)) + trs[i]) / period;
+        }
+        return atr;
+    }
+
+    function calcVwap(candles, days = 30) {
+        const slice = candles.slice(-days);
+        let pv = 0;
+        let volume = 0;
+        slice.forEach((candle) => {
+            const typical = (candle.high + candle.low + candle.close) / 3;
+            pv += typical * candle.volume;
+            volume += candle.volume;
+        });
+        return volume > 0 ? pv / volume : null;
+    }
+
+    function normalizeKlines(rows) {
+        if (!Array.isArray(rows)) return [];
+        return rows.map((row) => ({
+            time: Number(row[0]),
+            open: Number(row[1]),
+            high: Number(row[2]),
+            low: Number(row[3]),
+            close: Number(row[4]),
+            volume: Number(row[5])
+        })).filter((candle) => [candle.open, candle.high, candle.low, candle.close, candle.volume].every(Number.isFinite));
+    }
+
+    // ------------------------------------------------------------------------
+    // Red
+    // ------------------------------------------------------------------------
+    async function p1qFetchJson(url, timeoutMs = 15000) {
+        if (typeof window.QuantCoingeckoKey === 'function' && String(url).includes('api.coingecko.com')) {
+            const key = window.QuantCoingeckoKey();
+            if (key) {
+                const separator = String(url).includes('?') ? '&' : '?';
+                url += separator + 'x_cg_demo_api_key=' + encodeURIComponent(key);
+            }
+        }
+        const attempts = [];
+        attempts.push(url);
+        const isCoingecko = String(url).includes('api.coingecko.com');
+        if (isCoingecko) {
+            attempts.push('https://r.jina.ai/' + url);
+        }
+        try {
+            const local = typeof window.QuantLocalProxy === 'function' ? window.QuantLocalProxy(url) : null;
+            if (local) attempts.push(local);
+        } catch (error) { /* sin proxy */ }
+        if (isCoingecko) {
+            attempts.push('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
+        }
+
+        let lastError = null;
+        for (const target of attempts) {
+            const controller = new AbortController();
+            const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const response = await fetch(target, { cache: 'no-store', credentials: 'omit', signal: controller.signal });
+                if (!response.ok) {
+                    const error = new Error('HTTP ' + response.status);
+                    error.fatal = [400, 404, 422].includes(response.status);
+                    throw error;
+                }
+                const text = await response.text();
+                try {
+                    return JSON.parse(text);
+                } catch (jsonError) {
+                    const marker = text.indexOf('Markdown Content:');
+                    if (marker >= 0) return JSON.parse(text.slice(marker + 'Markdown Content:'.length).trim());
+                    throw new Error('Respuesta no JSON');
+                }
+            } catch (error) {
+                lastError = error;
+                if (error && error.fatal) break;
+            } finally {
+                window.clearTimeout(timer);
+            }
+        }
+        throw lastError || new Error('Sin respuesta');
+    }
+
+    async function resolveCoingeckoId(ticker) {
+        if (coingeckoIds.has(ticker)) return coingeckoIds.get(ticker);
+        const data = await p1qFetchJson('https://api.coingecko.com/api/v3/search?query=' + encodeURIComponent(ticker), 15000);
+        const coins = data && Array.isArray(data.coins) ? data.coins : [];
+        const exact = coins.filter((coin) => String(coin.symbol || '').toLowerCase() === ticker.toLowerCase());
+        const pool = exact.length ? exact : coins;
+        pool.sort((a, b) => (a.market_cap_rank || 1e9) - (b.market_cap_rank || 1e9));
+        if (!pool.length) throw new Error('CoinGecko no encontró ' + ticker);
+        coingeckoIds.set(ticker, pool[0].id);
+        return pool[0].id;
+    }
+
+    async function fetchBinanceTicker(ticker) {
+        const symbol = encodeURIComponent(ticker + 'USDT');
+        const [daily, fourHour, funding] = await Promise.allSettled([
+            p1qFetchJson(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=210`, 20000),
+            p1qFetchJson(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=4h&limit=100`, 20000),
+            p1qFetchJson(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`, 12000)
+        ]);
+        if (daily.status !== 'fulfilled') throw new Error('Sin velas 1D');
+        const candles1d = normalizeKlines(daily.value);
+        if (candles1d.length < 50) throw new Error('Velas 1D insuficientes');
+        const candles4h = fourHour.status === 'fulfilled' ? normalizeKlines(fourHour.value) : [];
+        const closes1d = candles1d.map((candle) => candle.close);
+        const closes4h = candles4h.map((candle) => candle.close);
+        const price = closes1d[closes1d.length - 1];
+        const previous = closes1d[closes1d.length - 2];
+        const change24h = previous ? ((price / previous) - 1) * 100 : null;
+        const rsi1dArr = calcRsi(closes1d, 14);
+        const rsi4hArr = calcRsi(closes4h, 14);
+        const ema20Arr = calcEma(closes1d, 20);
+        const ema50Arr = calcEma(closes1d, 50);
+        const ema200Arr = calcEma(closes1d, 200);
+        const last90 = candles1d.slice(-90);
+        const high90 = Math.max(...last90.map((candle) => candle.high));
+        const low90 = Math.min(...last90.map((candle) => candle.low));
+        const fib618 = high90 > low90 ? high90 - ((high90 - low90) * 0.618) : null;
+        const fundingRate = funding.status === 'fulfilled' && funding.value ? Number(funding.value.lastFundingRate) : null;
+        return {
+            ok: true,
+            source: 'Binance',
+            price,
+            change24h,
+            rsi1d: rsi1dArr[rsi1dArr.length - 1],
+            rsi4h: rsi4hArr.length ? rsi4hArr[rsi4hArr.length - 1] : null,
+            vwap30: calcVwap(candles1d, 30),
+            ema20: ema20Arr[ema20Arr.length - 1],
+            ema50: ema50Arr[ema50Arr.length - 1],
+            ema200: ema200Arr[ema200Arr.length - 1],
+            atr14: calcAtr(candles1d, 14),
+            fib618,
+            high90,
+            low90,
+            funding: Number.isFinite(fundingRate) ? fundingRate * 100 : null,
+            updatedAt: Date.now()
+        };
+    }
+
+    async function fetchCoingeckoTicker(ticker) {
+        const id = await resolveCoingeckoId(ticker);
+        const url = 'https://api.coingecko.com/api/v3/simple/price?ids=' + encodeURIComponent(id) + '&vs_currencies=usd&include_24hr_change=true';
+        const data = await p1qFetchJson(url, 18000);
+        const row = data && data[id];
+        if (!row || !Number.isFinite(Number(row.usd))) throw new Error('CoinGecko sin precio');
+        return {
+            ok: true,
+            source: 'CoinGecko',
+            price: Number(row.usd),
+            change24h: Number.isFinite(Number(row.usd_24h_change)) ? Number(row.usd_24h_change) : null,
+            rsi1d: null,
+            rsi4h: null,
+            vwap30: null,
+            ema20: null,
+            ema50: null,
+            ema200: null,
+            atr14: null,
+            fib618: null,
+            high90: null,
+            low90: null,
+            funding: null,
+            updatedAt: Date.now()
+        };
+    }
+
+    async function fetchTicker(ticker) {
+        try {
+            return await fetchBinanceTicker(ticker);
+        } catch (binanceError) {
+            try {
+                return await fetchCoingeckoTicker(ticker);
+            } catch (coingeckoError) {
+                return { ok: false, error: 'Sin datos en Binance ni CoinGecko' };
+            }
+        }
+    }
+
+    async function refreshMarket(force) {
+        if (state.loading) return;
+        if (!state.positions.length) {
+            setStatus('Agrega tu primera compra para empezar a calcular el portafolio.', '#9ca3af');
+            return;
+        }
+        const missingMarket = state.positions.some((position) => !state.market.has(position.ticker));
+        if (!force && !missingMarket && state.market.size && (Date.now() - state.lastFetch) < 60000) return;
+
+        state.loading = true;
+        const button = document.getElementById('p1q-refresh');
+        if (button) {
+            button.disabled = true;
+            button.textContent = '⏳ Actualizando…';
+        }
+        setStatus('⏳ Consultando precios e indicadores en Binance y CoinGecko…', '#f59e0b');
+
+        let ok = 0;
+        let failed = 0;
+        await Promise.all(state.positions.map(async (position) => {
+            const ticker = position.ticker;
+            try {
+                const value = await fetchTicker(ticker);
+                if (value && value.ok) {
+                    state.market.set(ticker, value);
+                    ok += 1;
+                } else {
+                    const existing = state.market.get(ticker);
+                    if (!existing || !existing.ok) {
+                        state.market.set(ticker, { ok: false, source: '—', price: null, error: value && value.error ? value.error : 'Error de red' });
+                        failed += 1;
+                    }
+                }
+            } catch (error) {
+                const existing = state.market.get(ticker);
+                if (!existing || !existing.ok) {
+                    state.market.set(ticker, { ok: false, source: '—', price: null, error: 'Error de red' });
+                    failed += 1;
+                }
+            }
+            render();
+            return null;
+        }));
+        state.lastFetch = Date.now();
+        state.loading = false;
+        if (button) {
+            button.disabled = false;
+            button.textContent = '🔄 Actualizar Mercado';
+        }
+        render();
+        const time = new Date().toLocaleTimeString('es-ES', { hour12: false });
+        setStatus(
+            `✅ ${ok}/${state.positions.length} activos actualizados · ${time}${failed ? ` · ${failed} sin datos (se conserva el último precio)` : ''}`,
+            failed ? '#f59e0b' : '#10b981'
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // Cálculos de portafolio
+    // ------------------------------------------------------------------------
+    function computeRows() {
+        const rows = state.positions.map((position) => {
+            const totals = positionTotals(position);
+            const market = state.market.get(position.ticker) || {};
+            const price = market.ok ? market.price : null;
+            const value = price != null ? totals.qty * price : null;
+            const pnl = value != null ? value - totals.cost : null;
+            const pnlPct = (pnl != null && totals.cost > 0) ? (pnl / totals.cost) * 100 : null;
+            const entry = entryDiagnosis(totals.avg, market.vwap30, market.ema50);
+            const tactical = tacticalState(price, market, pnlPct);
+            return {
+                position,
+                ticker: position.ticker,
+                lots: position.lots.length,
+                qty: totals.qty,
+                cost: totals.cost,
+                avg: totals.avg,
+                market,
+                price,
+                value,
+                pnl,
+                pnlPct,
+                weight: 0,
+                entry,
+                tactical,
+                stop: price != null && market.atr14 ? price - (2 * market.atr14) : null
+            };
+        });
+        const totalValue = rows.reduce((sum, row) => sum + (row.value != null ? row.value : 0), 0);
+        const totalCost = rows.reduce((sum, row) => sum + row.cost, 0);
+        const costWeightBase = rows.reduce((sum, row) => sum + row.cost, 0);
+        rows.forEach((row) => {
+            if (totalValue > 0 && row.value != null) row.weight = (row.value / totalValue) * 100;
+            else row.weight = costWeightBase > 0 ? (row.cost / costWeightBase) * 100 : 0;
+        });
+        return { rows, totalValue, totalCost };
+    }
+
+    function entryDiagnosis(avg, vwap, ema50) {
+        if (!vwap || !avg) return { label: '—', color: '#6b7280', detail: 'VWAP no disponible' };
+        const emaText = ema50 ? ` · EMA50 ${fmtPrice(ema50)}` : '';
+        if (avg <= vwap * 0.97) return { label: '💎 ENTRADA IDEAL (Descuento)', color: '#10b981', detail: 'Compraste por debajo del VWAP 30D' + emaText };
+        if (avg <= vwap * 1.05) return { label: '✅ POSICIÓN EQUILIBRADA', color: '#60a5fa', detail: 'Dentro del rango del VWAP 30D' + emaText };
+        return { label: '⚠️ ENTRADA ALTA (Sobreextendida)', color: '#ef4444', detail: 'Por encima del VWAP 30D' + emaText };
+    }
+
+    function tacticalState(price, market, pnlPct) {
+        if (market && market.rsi1d != null && market.rsi1d > 72 && pnlPct != null && pnlPct > 25) {
+            return { label: '🔥 TOMAR PARCIALES', color: '#ef4444' };
+        }
+        if (price != null && ((market && market.fib618 != null && price <= market.fib618) || (market && market.rsi4h != null && market.rsi4h < 35))) {
+            return { label: '🟢 ZONA DCA IDEAL', color: '#10b981' };
+        }
+        return { label: '🟡 MANTENER / HOLD', color: '#facc15' };
+    }
+
+    function rsiBadge(rsi) {
+        const value = num(rsi);
+        if (value == null) return '<span class="p1q-muted">—</span>';
+        let label = '⚪ NEUTRAL';
+        let color = '#9ca3af';
+        if (value > 70) { label = '🔴 SOBRECOMPRADO'; color = '#ef4444'; }
+        else if (value < 30) { label = '🟢 SOBREVENDIDO'; color = '#10b981'; }
+        return `<span style="color:${color};font-weight:700;">${value.toFixed(1)}</span> <span class="p1q-muted">${label}</span>`;
+    }
+
+    // ------------------------------------------------------------------------
+    // Render
+    // ------------------------------------------------------------------------
+    function setStatus(text, color) {
+        const status = document.getElementById('p1q-status');
+        if (!status) return;
+        status.textContent = text;
+        status.style.color = color || '#9ca3af';
+    }
+
+    function renderKpis(rows, totalValue, totalCost) {
+        const totalPnl = rows.reduce((sum, row) => sum + (row.pnl != null ? row.pnl : 0), 0);
+        const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : null;
+        const pricedRows = rows.filter((row) => row.value != null);
+        const pricedValue = pricedRows.reduce((sum, row) => sum + row.value, 0);
+        const profitValue = pricedRows.filter((row) => row.pnl > 0).reduce((sum, row) => sum + row.value, 0);
+        const profitPct = pricedValue > 0 ? (profitValue / pricedValue) * 100 : null;
+        const rsiRows = pricedRows.filter((row) => row.market && row.market.rsi1d != null);
+        const rsiWeight = rsiRows.reduce((sum, row) => sum + row.value, 0);
+        const weightedRsi = rsiWeight > 0 ? rsiRows.reduce((sum, row) => sum + (row.market.rsi1d * row.value), 0) / rsiWeight : null;
+        const qualityRows = pricedRows.filter((row) => row.market && row.market.vwap30 && row.avg <= row.market.vwap30 * 0.97);
+        const qualityValue = qualityRows.reduce((sum, row) => sum + row.value, 0);
+        const qualityPct = pricedValue > 0 ? (qualityValue / pricedValue) * 100 : null;
+        const dayRows = rows.filter((row) => row.market && row.market.change24h != null);
+        dayRows.sort((a, b) => b.market.change24h - a.market.change24h);
+        const best = dayRows[0];
+        const worst = dayRows[dayRows.length - 1];
+
+        const set = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = value;
+        };
+        set('p1q-kpi-total', fmtUsd(totalValue));
+        set('p1q-kpi-invested', fmtUsd(totalCost));
+        set('p1q-kpi-pnl', `<span class="${totalPnl >= 0 ? 'p1q-green' : 'p1q-red'}">${totalPnl >= 0 ? '+' : ''}${fmtUsd(totalPnl)}</span>`);
+        set('p1q-kpi-pnl-pct', `<span class="${totalPnlPct >= 0 ? 'p1q-green' : 'p1q-red'}">${fmtPct(totalPnlPct)}</span>`);
+        set('p1q-kpi-rsi', weightedRsi == null ? '—' : weightedRsi.toFixed(1));
+        set('p1q-kpi-rsi-sub', weightedRsi == null
+            ? 'Sin datos de RSI'
+            : (weightedRsi < 35 ? 'Miedo / oportunidad' : (weightedRsi > 65 ? 'Sobrecalentado' : 'Neutral')));
+        set('p1q-kpi-profit', profitPct == null ? '—' : `${profitPct.toFixed(1)}%`);
+        set('p1q-kpi-quality', qualityPct == null ? '—' : `${qualityPct.toFixed(1)}%`);
+        set('p1q-kpi-quality-sub', `Capital bajo VWAP 30D · ${qualityRows.length} activo${qualityRows.length === 1 ? '' : 's'}`);
+        set('p1q-kpi-best', best ? `<span class="p1q-green">${esc(best.ticker)} ${fmtPct(best.market.change24h, 1)}</span>` : '—');
+        set('p1q-kpi-worst', worst ? `<span class="p1q-red">${esc(worst.ticker)} ${fmtPct(worst.market.change24h, 1)}</span>` : '—');
+    }
+
+    function lotsHtml(row) {
+        return `<div class="p1q-lots-box">
+            <div class="p1q-mini-title">Lotes de compra</div>
+            <table class="p1q-lots-table">
+                <thead><tr><th>Fecha</th><th>Cantidad</th><th>Precio</th><th>Costo</th><th></th></tr></thead>
+                <tbody>
+                    ${row.position.lots.map((lot) => `<tr>
+                        <td>${fmtDate(lot.date)}</td>
+                        <td>${fmtQty(lot.qty)}</td>
+                        <td>${fmtPrice(lot.price)}</td>
+                        <td>${fmtUsd(lot.qty * lot.price)}</td>
+                        <td><button type="button" class="p1q-icon-btn p1q-red" data-p1q-del-lot="${esc(row.ticker)}|${esc(lot.id)}" title="Eliminar lote">✕</button></td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>
+        </div>`;
+    }
+
+    function indicatorsHtml(row) {
+        const m = row.market || {};
+        const cell = (label, value) => `<div><span>${label}</span><strong>${value}</strong></div>`;
+        return `<div class="p1q-indicators-box">
+            <div class="p1q-mini-title">Indicadores 1D / 4H</div>
+            <div class="p1q-ind-grid">
+                ${cell('EMA 20', fmtPrice(m.ema20))}
+                ${cell('EMA 50', fmtPrice(m.ema50))}
+                ${cell('EMA 200', fmtPrice(m.ema200))}
+                ${cell('VWAP 30D', fmtPrice(m.vwap30))}
+                ${cell('Fib 0.618', fmtPrice(m.fib618))}
+                ${cell('ATR 14', fmtPrice(m.atr14))}
+                ${cell('RSI 4H', m.rsi4h != null ? m.rsi4h.toFixed(1) : '—')}
+                ${cell('RSI 1D', m.rsi1d != null ? m.rsi1d.toFixed(1) : '—')}
+                ${cell('Funding', m.funding != null ? `${m.funding >= 0 ? '+' : ''}${m.funding.toFixed(4)}%` : '—')}
+            </div>
+        </div>`;
+    }
+
+    function dcaHtml(row) {
+        return `<div class="p1q-dca-box">
+            <div class="p1q-mini-title">🧮 Simulador DCA</div>
+            <label class="p1q-dca-label">Monto a invertir (USD)
+                <input type="number" min="0" step="any" placeholder="100" data-p1q-dca-input="${esc(row.ticker)}" class="p1q-input" />
+            </label>
+            <div data-p1q-dca-output="${esc(row.ticker)}" class="p1q-dca-output">Escribe un monto para ver el nuevo precio promedio.</div>
+            <div class="p1q-dca-meta">
+                <span>Promedio actual: <strong>${fmtPrice(row.avg)}</strong></span>
+                <span>VWAP 30D: <strong>${fmtPrice(row.market.vwap30)}</strong></span>
+            </div>
+        </div>`;
+    }
+
+    function renderTable(rows) {
+        const table = document.getElementById('p1q-table');
+        const empty = document.getElementById('p1q-empty');
+        const wrap = document.getElementById('p1q-table-wrap');
+        if (!table || !empty || !wrap) return;
+
+        if (!rows.length) {
+            wrap.style.display = 'none';
+            empty.style.display = 'block';
+            return;
+        }
+        wrap.style.display = 'block';
+        empty.style.display = 'none';
+
+        table.innerHTML = `<thead><tr>
+            <th>Activo</th><th>Cantidad</th><th>Promedio</th><th>Precio</th><th>Valor</th>
+            <th>PnL</th><th>Peso</th><th>RSI 4H / 1D</th><th>VWAP / Fib</th>
+            <th>Entrada / Táctica</th><th>Funding</th><th>SL ATR</th><th>Acciones</th>
+        </tr></thead><tbody>
+            ${rows.map((row) => {
+                const detailOpen = state.expanded.has(row.ticker);
+                const price = row.market.ok ? row.price : null;
+                const pnlPct = row.pnlPct;
+                return `<tr data-p1q-row="${esc(row.ticker)}">
+                    <td>
+                        <button type="button" class="p1q-expand-btn" data-p1q-expand="${esc(row.ticker)}" aria-label="Ver lotes">${detailOpen ? '▾' : '▸'}</button>
+                        <strong>${esc(row.ticker)}</strong>
+                        <span class="p1q-muted">${row.lots} lote${row.lots === 1 ? '' : 's'}</span>
+                    </td>
+                    <td>${fmtQty(row.qty)}</td>
+                    <td>${fmtPrice(row.avg)}</td>
+                    <td>${price != null ? fmtPrice(price) : '<span class="p1q-muted">—</span>'}</td>
+                    <td>${row.value != null ? fmtUsd(row.value) : '<span class="p1q-muted">—</span>'}</td>
+                    <td class="${pnlClass(row.pnl)}">
+                        ${row.pnl != null ? `${row.pnl >= 0 ? '+' : ''}${fmtUsd(row.pnl)}` : '—'}
+                        <div class="p1q-small">${fmtPct(pnlPct)}</div>
+                    </td>
+                    <td>
+                        <div>${row.weight.toFixed(1)}%</div>
+                        <div class="p1q-weight-bar"><span style="width:${Math.max(0, Math.min(100, row.weight)).toFixed(1)}%"></span></div>
+                    </td>
+                    <td><div class="p1q-rsi-line">4H ${rsiBadge(row.market.rsi4h)}</div><div class="p1q-rsi-line">1D ${rsiBadge(row.market.rsi1d)}</div></td>
+                    <td>
+                        <div>${fmtPrice(row.market.vwap30)}</div>
+                        <div class="p1q-small">Fib ${fmtPrice(row.market.fib618)}</div>
+                        <div class="p1q-small">EMA50 ${fmtPrice(row.market.ema50)}</div>
+                    </td>
+                    <td>
+                        <span title="${esc(row.entry.detail)}" style="color:${row.entry.color};font-weight:700;font-size:9px;">${row.entry.label}</span>
+                        <div class="p1q-small" style="color:${row.tactical.color};font-weight:700;">${row.tactical.label}</div>
+                    </td>
+                    <td>${row.market.funding != null ? `<span class="${row.market.funding >= 0 ? 'p1q-green' : 'p1q-red'}">${row.market.funding >= 0 ? '+' : ''}${row.market.funding.toFixed(4)}%</span>` : '<span class="p1q-muted">—</span>'}</td>
+                    <td>${row.stop != null ? fmtPrice(Math.max(0, row.stop)) : '<span class="p1q-muted">—</span>'}</td>
+                    <td class="p1q-actions-cell">
+                        <button type="button" class="p1q-mini-btn" data-p1q-dca-open="${esc(row.ticker)}">🧮 DCA</button>
+                        <button type="button" class="p1q-icon-btn p1q-red" data-p1q-del="${esc(row.ticker)}" title="Borrar activo">🗑</button>
+                    </td>
+                </tr>
+                <tr data-p1q-details="${esc(row.ticker)}" style="display:${detailOpen ? 'table-row' : 'none'};">
+                    <td colspan="13">
+                        <div class="p1q-details-grid">
+                            ${lotsHtml(row)}
+                            ${dcaHtml(row)}
+                            ${indicatorsHtml(row)}
+                        </div>
+                    </td>
+                </tr>`;
+            }).join('')}
+        </tbody>`;
+    }
+
+    function render() {
+        const computed = computeRows();
+        renderKpis(computed.rows, computed.totalValue, computed.totalCost);
+        renderTable(computed.rows);
+        const count = state.positions.length;
+        const marketCount = [...state.market.values()].filter((item) => item && item.ok).length;
+        if (count) {
+            const time = state.lastFetch ? new Date(state.lastFetch).toLocaleTimeString('es-ES', { hour12: false }) : '—';
+            setStatus(`💼 ${count} activo${count === 1 ? '' : 's'} · ${marketCount} con datos en vivo · última actualización ${time}`, marketCount ? '#10b981' : '#f59e0b');
+        } else {
+            setStatus('Agrega tu primera compra para empezar a calcular el portafolio.', '#9ca3af');
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // Acciones
+    // ------------------------------------------------------------------------
+    function addPurchase() {
+        const tickerInput = document.getElementById('p1q-ticker');
+        const qtyInput = document.getElementById('p1q-qty');
+        const priceInput = document.getElementById('p1q-price');
+        const status = document.getElementById('p1q-form-status');
+        const ticker = sanitizeTicker(tickerInput.value);
+        const qty = num(qtyInput.value);
+        const price = num(priceInput.value);
+        if (!ticker || !qty || qty <= 0 || !price || price <= 0) {
+            status.textContent = 'Completa ticker, cantidad y precio válidos.';
+            status.style.color = '#ef4444';
+            return;
+        }
+        let position = state.positions.find((item) => item.ticker === ticker);
+        if (!position) {
+            position = { ticker, lots: [] };
+            state.positions.push(position);
+        }
+        position.lots.push({ id: uid('lot'), qty, price, date: new Date().toISOString() });
+        savePositions();
+        tickerInput.value = '';
+        qtyInput.value = '';
+        priceInput.value = '';
+        status.textContent = `Compra de ${ticker} agregada.`;
+        status.style.color = '#10b981';
+        render();
+        refreshMarket(false);
+        tickerInput.focus();
+    }
+
+    function deleteLot(ticker, lotId) {
+        const position = state.positions.find((item) => item.ticker === ticker);
+        if (!position) return;
+        position.lots = position.lots.filter((lot) => lot.id !== lotId);
+        if (!position.lots.length) state.positions = state.positions.filter((item) => item.ticker !== ticker);
+        state.expanded.delete(ticker);
+        savePositions();
+        render();
+    }
+
+    function deletePosition(ticker) {
+        if (!window.confirm(`¿Borrar ${ticker} y todos sus lotes del portafolio?`)) return;
+        state.positions = state.positions.filter((item) => item.ticker !== ticker);
+        state.expanded.delete(ticker);
+        state.market.delete(ticker);
+        savePositions();
+        render();
+    }
+
+    function simulateDca(ticker, amount, output) {
+        const position = state.positions.find((item) => item.ticker === ticker);
+        const market = state.market.get(ticker) || {};
+        const computed = computeRows().rows.find((row) => row.ticker === ticker);
+        if (!output) return;
+        if (!position || !computed) return;
+        if (!market.ok || !computed.price) {
+            output.innerHTML = '<span class="p1q-amber">Actualiza el mercado para simular el DCA.</span>';
+            return;
+        }
+        const value = num(amount);
+        if (!value || value <= 0) {
+            output.innerHTML = 'Escribe un monto mayor que 0.';
+            return;
+        }
+        const addQty = value / computed.price;
+        const newQty = computed.qty + addQty;
+        const newCost = computed.cost + value;
+        const newAvg = newCost / newQty;
+        const oldCushion = ((computed.price / computed.avg) - 1) * 100;
+        const newCushion = ((computed.price / newAvg) - 1) * 100;
+        const cushionChange = newCushion - oldCushion;
+        const before = entryDiagnosis(computed.avg, market.vwap30, market.ema50);
+        const after = entryDiagnosis(newAvg, market.vwap30, market.ema50);
+        output.innerHTML = `
+            <div class="p1q-dca-result-grid">
+                <div><span class="p1q-muted">Nuevo promedio</span><strong>${fmtPrice(newAvg)}</strong></div>
+                <div><span class="p1q-muted">Nueva cantidad</span><strong>${fmtQty(newQty)}</strong></div>
+                <div><span class="p1q-muted">Colchón vs break-even</span><strong>${fmtPct(oldCushion)} → <span class="${cushionChange >= 0 ? 'p1q-green' : 'p1q-red'}">${fmtPct(newCushion)}</span></strong></div>
+                <div><span class="p1q-muted">Cambio</span><strong class="${cushionChange >= 0 ? 'p1q-green' : 'p1q-red'}">${cushionChange >= 0 ? '+' : ''}${cushionChange.toFixed(2)} pp ${cushionChange >= 0 ? 'más' : 'menos'} colchón</strong></div>
+            </div>
+            <div class="p1q-small" style="margin-top:4px;">Calificación vs VWAP: <span style="color:${before.color};">${before.label}</span> → <span style="color:${after.color};">${after.label}</span></div>`;
+    }
+
+    function exportJson() {
+        const payload = {
+            app: 'crypto-intelligence-dashboard',
+            panel: 'panel-01-portafolio-quant',
+            version: 2,
+            exportedAt: new Date().toISOString(),
+            positions: state.positions
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        const d = new Date();
+        const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+        anchor.href = url;
+        anchor.download = `portafolio-quant-${stamp}.json`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+        setStatus('Respaldo JSON descargado.', '#10b981');
+    }
+
+    async function importJson(file) {
+        if (!file) return;
+        try {
+            const text = await file.text();
+            const raw = JSON.parse(text);
+            const list = Array.isArray(raw) ? raw : (raw && raw.positions);
+            const normalized = normalizePositions(list);
+            if (!normalized.length) throw new Error('El archivo no contiene posiciones válidas.');
+            const totalLots = normalized.reduce((sum, position) => sum + position.lots.length, 0);
+            if (!window.confirm(`Importar ${normalized.length} activo(s) y ${totalLots} lote(s). Se reemplazará el portafolio actual. ¿Continuar?`)) return;
+            state.positions = normalized;
+            state.market.clear();
+            state.expanded.clear();
+            state.lastFetch = 0;
+            savePositions();
+            render();
+            refreshMarket(true);
+            setStatus('Portafolio importado correctamente.', '#10b981');
+        } catch (error) {
+            setStatus('⚠️ ' + error.message, '#ef4444');
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // UI
+    // ------------------------------------------------------------------------
+    const style = document.createElement('style');
+    style.id = 'p1q-style';
+    style.textContent = `
+        .p1q-tabbar { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+        .p1q-tab { background:#151924; color:#d1d5db; border:1px solid #374151; padding:8px 13px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer; }
+        .p1q-tab:hover { filter:brightness(1.15); }
+        .p1q-tab.is-active { background:#facc15; color:#000; border-color:#facc15; }
+        .p1q-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(175px,1fr)); gap:10px; margin-bottom:14px; }
+        .p1q-kpi { background:#111827; border:1px solid #1f2937; border-radius:10px; padding:12px; min-height:92px; }
+        .p1q-kpi-label { font-size:9px; color:#9ca3af; text-transform:uppercase; letter-spacing:.06em; }
+        .p1q-kpi-value { font-size:20px; font-weight:800; color:#facc15; margin-top:3px; line-height:1.1; }
+        .p1q-kpi-sub { font-size:9px; color:#9ca3af; margin-top:4px; line-height:1.35; }
+        .p1q-table-wrap { overflow-x:auto; border:1px solid #1f2937; border-radius:10px; }
+        .p1q-table { width:100%; min-width:1180px; border-collapse:collapse; font-size:10.5px; }
+        .p1q-table th { position:sticky; top:0; background:#151924; color:#9ca3af; text-align:left; padding:8px; border-bottom:1px solid #1f2937; white-space:nowrap; z-index:1; }
+        .p1q-table td { padding:8px; border-bottom:1px solid #1f2937; color:#e5e7eb; vertical-align:top; }
+        .p1q-table tr:hover td { background:#111827; }
+        .p1q-table .p1q-small { font-size:9px; color:#9ca3af; margin-top:2px; }
+        .p1q-green { color:#10b981 !important; }
+        .p1q-red { color:#ef4444 !important; }
+        .p1q-amber { color:#f59e0b !important; }
+        .p1q-muted { color:#9ca3af; font-size:9px; }
+        .p1q-weight-bar { height:5px; background:#1f2937; border-radius:4px; overflow:hidden; margin-top:4px; width:90px; }
+        .p1q-weight-bar span { display:block; height:100%; background:linear-gradient(90deg,#3b82f6,#facc15); }
+        .p1q-rsi-line { white-space:nowrap; font-size:9.5px; margin-bottom:3px; }
+        .p1q-actions-cell { white-space:nowrap; }
+        .p1q-icon-btn { background:#151924; color:#9ca3af; border:1px solid #374151; border-radius:5px; padding:3px 7px; font-size:10px; cursor:pointer; }
+        .p1q-icon-btn:hover { filter:brightness(1.2); }
+        .p1q-mini-btn { background:#1f2937; color:#d1d5db; border:1px solid #374151; border-radius:5px; padding:4px 8px; font-size:10px; font-weight:700; cursor:pointer; margin-right:4px; }
+        .p1q-mini-btn:hover { border-color:#60a5fa; filter:brightness(1.2); }
+        .p1q-expand-btn { background:transparent; border:none; color:#facc15; cursor:pointer; font-size:13px; padding:0 4px 0 0; }
+        .p1q-details-grid { display:grid; grid-template-columns:1.1fr 1fr .8fr; gap:12px; background:#0b0e14; border:1px solid #1f2937; border-radius:8px; padding:10px; }
+        .p1q-indicators-box { border-left:1px solid #1f2937; padding-left:12px; }
+        .p1q-ind-grid { display:grid; grid-template-columns:1fr 1fr; gap:5px 8px; }
+        .p1q-ind-grid div { background:#111827; border:1px solid #1f2937; border-radius:4px; padding:4px 5px; }
+        .p1q-ind-grid span { display:block; font-size:8px; color:#9ca3af; }
+        .p1q-ind-grid strong { font-size:9.5px; color:#fff; }
+        .p1q-mini-title { font-size:9px; color:#facc15; text-transform:uppercase; letter-spacing:.06em; font-weight:700; margin-bottom:5px; }
+        .p1q-lots-table { width:100%; border-collapse:collapse; font-size:10px; }
+        .p1q-lots-table th { color:#9ca3af; text-align:left; padding:3px; border-bottom:1px solid #1f2937; }
+        .p1q-lots-table td { padding:3px; border-bottom:1px solid #111827; }
+        .p1q-dca-box { border-left:1px solid #1f2937; padding-left:12px; }
+        .p1q-dca-label { display:block; font-size:9px; color:#9ca3af; }
+        .p1q-input { width:100%; margin-top:3px; background:#0b0e14; border:1px solid #374151; color:#fff; padding:6px 8px; border-radius:5px; font-size:11px; }
+        .p1q-dca-output { font-size:10px; color:#d1d5db; margin-top:7px; line-height:1.45; }
+        .p1q-dca-result-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:4px; }
+        .p1q-dca-result-grid div { background:#111827; border:1px solid #1f2937; border-radius:5px; padding:5px; }
+        .p1q-dca-result-grid span { display:block; font-size:8px; }
+        .p1q-dca-result-grid strong { font-size:10px; color:#fff; }
+        .p1q-dca-meta { display:flex; gap:10px; flex-wrap:wrap; font-size:9px; color:#9ca3af; margin-top:6px; }
+        .p1q-empty { background:#111827; border:1px dashed #374151; border-radius:10px; padding:24px; text-align:center; color:#9ca3af; }
+        #p1q-section .section-heading { margin-bottom:14px; }
+        @media (max-width: 760px) {
+            .p1q-details-grid { grid-template-columns:1fr; }
+            .p1q-dca-box { border-left:none; border-top:1px solid #1f2937; padding-left:0; padding-top:10px; }
+            .p1q-indicators-box { border-left:none; border-top:1px solid #1f2937; padding-left:0; padding-top:10px; }
+            .p1q-kpi-value { font-size:17px; }
+        }
+    `;
+    document.head.appendChild(style);
+
+    function portfolioHtml() {
+        return `
+        <section id="p1q-section">
+            <header class="section-heading" style="margin-top:0;">
+                <div class="section-heading-copy">
+                    <div class="eyebrow"><span class="live-dot"></span> Panel 01 / Portafolio Quant</div>
+                    <h2>💼 Mi Portafolio Quant</h2>
+                    <p>Multi-lote, precio promedio ponderado, indicadores en vivo y simulador DCA.</p>
+                </div>
+                <div class="heading-actions">
+                    <button class="btn btn-secondary" type="button" id="p1q-refresh">🔄 Actualizar Mercado</button>
+                    <button class="btn btn-ghost" type="button" id="p1q-export">💾 Exportar JSON</button>
+                    <button class="btn btn-ghost" type="button" id="p1q-import-btn">📂 Importar JSON</button>
+                    <input id="p1q-import-file" type="file" accept="application/json,.json" hidden />
+                </div>
+            </header>
+
+            <div class="card" style="padding:14px; margin-bottom:14px;">
+                <div class="eyebrow" style="margin-bottom:8px;">Registro rápido de compra</div>
+                <form id="p1q-add-form" autocomplete="off" style="display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:8px; align-items:end;">
+                    <label style="font-size:9px; color:#9ca3af;">Ticker
+                        <input id="p1q-ticker" class="p1q-input" type="text" placeholder="BTC, SOL, SUI…" maxlength="15" />
+                    </label>
+                    <label style="font-size:9px; color:#9ca3af;">Cantidad de monedas
+                        <input id="p1q-qty" class="p1q-input" type="number" min="0" step="any" placeholder="0.5" />
+                    </label>
+                    <label style="font-size:9px; color:#9ca3af;">Precio de compra (USD)
+                        <input id="p1q-price" class="p1q-input" type="number" min="0" step="any" placeholder="50000" />
+                    </label>
+                    <button class="btn btn-primary" type="submit" id="p1q-add">+ Agregar Compra</button>
+                </form>
+                <div id="p1q-form-status" style="font-size:10px; color:#9ca3af; min-height:14px; margin-top:6px;"></div>
+            </div>
+
+            <div class="p1q-kpis">
+                <div class="p1q-kpi">
+                    <div class="p1q-kpi-label">Valor actual</div>
+                    <div class="p1q-kpi-value" id="p1q-kpi-total">$0.00</div>
+                    <div class="p1q-kpi-sub">Invertido: <span id="p1q-kpi-invested">$0.00</span></div>
+                </div>
+                <div class="p1q-kpi">
+                    <div class="p1q-kpi-label">Ganancia / Pérdida</div>
+                    <div class="p1q-kpi-value" id="p1q-kpi-pnl">$0.00</div>
+                    <div class="p1q-kpi-sub" id="p1q-kpi-pnl-pct">0.00%</div>
+                </div>
+                <div class="p1q-kpi">
+                    <div class="p1q-kpi-label">Salud del portafolio</div>
+                    <div class="p1q-kpi-value" id="p1q-kpi-rsi">—</div>
+                    <div class="p1q-kpi-sub" id="p1q-kpi-rsi-sub">RSI 1D ponderado + capital en ganancias</div>
+                    <div class="p1q-kpi-sub">En ganancias: <span id="p1q-kpi-profit">—</span></div>
+                </div>
+                <div class="p1q-kpi">
+                    <div class="p1q-kpi-label">Calidad de entradas</div>
+                    <div class="p1q-kpi-value" id="p1q-kpi-quality">—</div>
+                    <div class="p1q-kpi-sub" id="p1q-kpi-quality-sub">Capital bajo VWAP 30D</div>
+                </div>
+                <div class="p1q-kpi">
+                    <div class="p1q-kpi-label">Mejor / Peor del día</div>
+                    <div class="p1q-kpi-value" style="font-size:13px; line-height:1.5;" id="p1q-kpi-best">—</div>
+                    <div class="p1q-kpi-sub" id="p1q-kpi-worst">—</div>
+                </div>
+            </div>
+
+            <div id="p1q-status" style="font-size:10px; color:#9ca3af; margin-bottom:8px;">Agrega tu primera compra para empezar.</div>
+
+            <div id="p1q-empty" class="p1q-empty">
+                <div style="font-size:26px; margin-bottom:6px;">💼</div>
+                <strong style="color:#fff;">Tu portafolio está vacío</strong>
+                <p style="margin-top:6px;">Registra una compra arriba. Puedes añadir varios lotes de la misma moneda: el precio promedio se calcula automáticamente.</p>
+            </div>
+
+            <div id="p1q-table-wrap" class="p1q-table-wrap" style="display:none;">
+                <table id="p1q-table" class="p1q-table"></table>
+            </div>
+
+            <div class="p1q-small" style="margin-top:8px; color:#6b7280; font-size:9px; line-height:1.5;">
+                RSI Wilder 14, VWAP 30D, EMA 20/50/200, ATR 14 y Fibonacci 0.618 calculados con velas de Binance. Si el token no está en Binance, se usa CoinGecko para precio y PnL; los indicadores avanzados quedan como “—”.
+            </div>
+        </section>`;
+    }
+
+    // ------------------------------------------------------------------------
+    // Eventos
+    // ------------------------------------------------------------------------
+    function bindPortfolioEvents(root) {
+        const form = root.querySelector('#p1q-add-form');
+        if (form) form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            addPurchase();
+        });
+
+        const refresh = root.querySelector('#p1q-refresh');
+        if (refresh) refresh.addEventListener('click', () => refreshMarket(true));
+
+        const exportBtn = root.querySelector('#p1q-export');
+        if (exportBtn) exportBtn.addEventListener('click', exportJson);
+
+        const importBtn = root.querySelector('#p1q-import-btn');
+        const importFile = root.querySelector('#p1q-import-file');
+        if (importBtn && importFile) {
+            importBtn.addEventListener('click', () => importFile.click());
+            importFile.addEventListener('change', (event) => {
+                const file = event.target.files && event.target.files[0];
+                event.target.value = '';
+                importJson(file);
+            });
+        }
+
+        const table = root.querySelector('#p1q-table');
+        if (table) {
+            table.addEventListener('click', (event) => {
+                const expand = event.target.closest('[data-p1q-expand]');
+                if (expand) {
+                    const ticker = expand.getAttribute('data-p1q-expand');
+                    if (state.expanded.has(ticker)) state.expanded.delete(ticker);
+                    else state.expanded.add(ticker);
+                    render();
+                    return;
+                }
+                const dcaOpen = event.target.closest('[data-p1q-dca-open]');
+                if (dcaOpen) {
+                    const ticker = dcaOpen.getAttribute('data-p1q-dca-open');
+                    state.expanded.add(ticker);
+                    render();
+                    window.setTimeout(() => {
+                        const input = root.querySelector(`[data-p1q-dca-input="${ticker}"]`);
+                        if (input) input.focus();
+                    }, 30);
+                    return;
+                }
+                const delLot = event.target.closest('[data-p1q-del-lot]');
+                if (delLot) {
+                    const [ticker, lotId] = delLot.getAttribute('data-p1q-del-lot').split('|');
+                    deleteLot(ticker, lotId);
+                    return;
+                }
+                const del = event.target.closest('[data-p1q-del]');
+                if (del) {
+                    deletePosition(del.getAttribute('data-p1q-del'));
+                }
+            });
+            table.addEventListener('input', (event) => {
+                const input = event.target.closest('[data-p1q-dca-input]');
+                if (!input) return;
+                const ticker = input.getAttribute('data-p1q-dca-input');
+                const output = root.querySelector(`[data-p1q-dca-output="${ticker}"]`);
+                simulateDca(ticker, input.value, output);
+            });
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // Integración como pestaña en Panel 01
+    // ------------------------------------------------------------------------
+    function cleanup() {
+        const oldTabbar = document.getElementById('p1q-tabbar');
+        const oldPanels = document.getElementById('p1q-pane-wallets');
+        const panel = document.getElementById('panel-wallet');
+        if (oldPanels && panel) {
+            while (oldPanels.firstChild) panel.appendChild(oldPanels.firstChild);
+            oldPanels.remove();
+        }
+        if (oldTabbar) oldTabbar.remove();
+        const oldPortfolio = document.getElementById('p1q-pane-portfolio');
+        if (oldPortfolio) oldPortfolio.remove();
+        const oldModal = document.getElementById('p1q-modal');
+        if (oldModal) oldModal.remove();
+        const oldOverlay = document.getElementById('p1q-overlay');
+        if (oldOverlay) oldOverlay.remove();
+        const oldDock = document.getElementById('dock-btn-portfolio');
+        if (oldDock) oldDock.remove();
+        const oldShortcut = document.getElementById('p1q-open-tab');
+        if (oldShortcut) oldShortcut.remove();
+        const oldStyle = document.getElementById('p1q-style');
+        if (oldStyle) oldStyle.remove();
+    }
+
+    function activateTab(tab, skipLoad) {
+        state.activeTab = tab === 'portfolio' ? 'portfolio' : 'wallets';
+        const walletsPane = document.getElementById('p1q-pane-wallets');
+        const portfolioPane = document.getElementById('p1q-pane-portfolio');
+        if (!walletsPane || !portfolioPane) return;
+        walletsPane.style.display = state.activeTab === 'wallets' ? 'block' : 'none';
+        portfolioPane.style.display = state.activeTab === 'portfolio' ? 'block' : 'none';
+        document.querySelectorAll('[data-p1q-tab]').forEach((button) => {
+            const active = button.getAttribute('data-p1q-tab') === state.activeTab;
+            button.classList.toggle('is-active', active);
+        });
+        if (state.activeTab === 'portfolio') {
+            render();
+            if (!skipLoad) refreshMarket(false);
+        }
+    }
+
+    function bindTabs() {
+        document.querySelectorAll('[data-p1q-tab]').forEach((button) => {
+            button.addEventListener('click', () => activateTab(button.getAttribute('data-p1q-tab')));
+        });
+    }
+
+    function addDockButton() {
+        const old = document.getElementById('dock-btn-portfolio');
+        if (old) old.remove();
+        const dock = document.getElementById('master-unified-bottom-dock');
+        if (!dock) return;
+        const btn = document.createElement('button');
+        btn.id = 'dock-btn-portfolio';
+        btn.type = 'button';
+        btn.className = 'dock-btn is-green';
+        btn.title = 'Ir a Mi Portafolio Quant';
+        btn.innerHTML = '<span class="dock-icon">💼</span><span class="dock-label">Portafolio Quant</span>';
+        btn.addEventListener('click', () => {
+            const panel = document.getElementById('panel-wallet');
+            if (!panel) return;
+            if (window.location.hash !== '#panel-wallet') window.location.hash = 'panel-wallet';
+            window.setTimeout(() => {
+                activateTab('portfolio');
+                const section = document.getElementById('p1q-section');
+                if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 220);
+        });
+        dock.appendChild(btn);
+    }
+
+    function init() {
+        cleanup();
+        if (!document.getElementById('p1q-style')) document.head.appendChild(style);
+        state.positions = loadPositions();
+
+        const panel = document.getElementById('panel-wallet');
+        if (!panel) {
+            // Respaldo: modal flotante si el panel no existe.
+            const overlay = document.createElement('div');
+            overlay.id = 'p1q-overlay';
+            overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:999998;';
+            const modal = document.createElement('div');
+            modal.id = 'p1q-modal';
+            modal.style.cssText = 'display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:999999;background:#0b0e14;border:1px solid #facc15;border-radius:12px;width:96%;max-width:1200px;max-height:92vh;overflow:auto;padding:16px;color:#f3f4f6;box-sizing:border-box;';
+            modal.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><strong style="color:#facc15;">💼 Mi Portafolio Quant</strong><button id="p1q-close" type="button" style="background:#1f2937;color:#fff;border:none;padding:6px 10px;border-radius:6px;cursor:pointer;">✕</button></div>' + portfolioHtml();
+            document.body.appendChild(overlay);
+            document.body.appendChild(modal);
+            bindPortfolioEvents(modal);
+            const close = () => { modal.style.display = 'none'; overlay.style.display = 'none'; };
+            overlay.addEventListener('click', close);
+            modal.querySelector('#p1q-close').addEventListener('click', close);
+            const dock = document.getElementById('master-unified-bottom-dock');
+            if (dock) {
+                const btn = document.createElement('button');
+                btn.id = 'dock-btn-portfolio';
+                btn.type = 'button';
+                btn.className = 'dock-btn is-green';
+                btn.textContent = '💼 Portafolio Quant';
+                btn.addEventListener('click', () => { modal.style.display = 'block'; overlay.style.display = 'block'; });
+                dock.appendChild(btn);
+            }
+            render();
+            return;
+        }
+
+        const tabbar = document.createElement('div');
+        tabbar.id = 'p1q-tabbar';
+        tabbar.className = 'p1q-tabbar';
+        tabbar.innerHTML = `
+            <button type="button" class="p1q-tab is-active" data-p1q-tab="wallets">🔗 Wallets & Smart Money</button>
+            <button type="button" class="p1q-tab" data-p1q-tab="portfolio">💼 Mi Portafolio Quant</button>`;
+
+        const walletsPane = document.createElement('div');
+        walletsPane.id = 'p1q-pane-wallets';
+        const portfolioPane = document.createElement('div');
+        portfolioPane.id = 'p1q-pane-portfolio';
+        portfolioPane.style.display = 'none';
+        portfolioPane.innerHTML = portfolioHtml();
+
+        while (panel.firstChild) walletsPane.appendChild(panel.firstChild);
+        panel.appendChild(tabbar);
+        panel.appendChild(walletsPane);
+        panel.appendChild(portfolioPane);
+
+        const headingActions = walletsPane.querySelector('.heading-actions');
+        if (headingActions) {
+            const shortcut = document.createElement('button');
+            shortcut.type = 'button';
+            shortcut.className = 'btn btn-secondary';
+            shortcut.id = 'p1q-open-tab';
+            shortcut.textContent = '💼 Mi Portafolio';
+            shortcut.addEventListener('click', () => activateTab('portfolio'));
+            headingActions.insertBefore(shortcut, headingActions.firstChild);
+        }
+
+        bindTabs();
+        bindPortfolioEvents(portfolioPane);
+        activateTab('wallets', true);
+        addDockButton();
+        render();
+    }
+
+    window.PortfolioQuant = Object.freeze({
+        refresh: () => refreshMarket(true),
+        getData: () => JSON.parse(JSON.stringify(state.positions)),
+        getMarket: () => Object.fromEntries([...state.market.entries()]),
+        open: () => {
+            if (window.location.hash !== '#panel-wallet') window.location.hash = 'panel-wallet';
+            window.setTimeout(() => activateTab('portfolio'), 200);
+        },
+        storageKey: STORAGE_KEY
+    });
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init, { once: true });
+    } else {
+        init();
+    }
+})();
